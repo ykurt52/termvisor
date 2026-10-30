@@ -10,7 +10,8 @@ use crate::editor::{self, Mode};
 use crate::sessions::{self, Node, NodeKind};
 use crate::state::State;
 use crate::store::{self, Entry, Folder, Ssh};
-use crate::term::Launch;
+use crate::keyring;
+use crate::term::{Kind, Launch};
 
 /// Opens a session or reports why it can't.
 pub type OpenFn = Rc<dyn Fn(Result<Launch, String>)>;
@@ -175,6 +176,9 @@ fn row_menu(node: Option<&Node>) -> gio::Menu {
                     menu_item(fav, "sess.favorite", None),
                 ]),
             );
+            if node.is_some_and(|n| matches!(&n.kind, NodeKind::Item(Ok(l)) if l.kind == Kind::Ssh)) {
+                menu.append_section(None, &section(&[menu_item("Forget Saved Password", "sess.forget", None)]));
+            }
             menu.append_section(None, &create(parent, true));
             menu.append_section(None, &section(&[menu_item("Delete…", "sess.delete", None)]));
         }
@@ -288,6 +292,15 @@ fn row_actions(state: &Rc<State>, open: &OpenFn, ctx: &Rc<RefCell<Option<Node>>>
             }
         });
         d.present(Some(&w));
+    }));
+
+    let (c, r) = (ctx.clone(), report.clone());
+    add("forget", None, Box::new(move |_| {
+        let target = match c.borrow().as_ref().map(|n| &n.kind) {
+            Some(NodeKind::Item(Ok(l))) => l.target.clone(),
+            _ => return,
+        };
+        r(keyring::clear(&keyring::password_id(&target)));
     }));
 
     let (st, c, r) = (state.clone(), ctx.clone(), report.clone());

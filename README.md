@@ -8,7 +8,8 @@ Specification: [docs/SPEC.md](docs/SPEC.md).
 Milestone 1 plus the UI shell:
 
 - Activity bar, side panel with session tree (local shell + hosts from `~/.ssh/config`)
-- Quick connect bar (`user@host:port`, `ssh <args>`)
+- Quick connect bar (`user@host:port`, `ssh <args>`, `/dev/ttyUSB0@115200`)
+- Serial ports with toolbar, hex view, locking, mirror and auto-reconnect
 - Tabs with nested split panes, start page when no tab is open
 - Bottom dock and status bar
 - Live theme switching
@@ -20,13 +21,13 @@ Panels marked with a milestone number are placeholders.
 Dependencies (Debian/Ubuntu):
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev build-essential pkg-config
+sudo apt install libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev libudev-dev build-essential pkg-config
 ```
 
 Dependencies (Arch):
 
 ```sh
-sudo pacman -S gtk4 libadwaita vte4 base-devel
+sudo pacman -S gtk4 libadwaita vte4 libsecret base-devel
 ```
 
 Rust 1.92 or newer (via rustup), then:
@@ -56,6 +57,8 @@ cargo build --release
 Drag a tab out of the tab bar to open it in a new window.
 
 An SSH pane stays open when the session ends; press Enter to reconnect.
+SSH prompts, connection sharing and the keyring: [docs/ssh.md](docs/ssh.md).
+Serial ports, locking, mirror and reconnect: [docs/serial.md](docs/serial.md).
 
 ## Files
 

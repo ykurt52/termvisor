@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::serial::SerialCfg;
 use crate::settings;
 use crate::term::Launch;
 
@@ -67,6 +68,9 @@ pub struct Ssh {
     pub color: Option<String>,
     #[serde(skip_serializing_if = "is_false")]
     pub favorite: bool,
+    /// Never read or store the password in the keyring.
+    #[serde(skip_serializing_if = "is_false")]
+    pub no_store: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -81,12 +85,25 @@ pub struct Shell {
     pub favorite: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Serial {
+    pub name: String,
+    #[serde(flatten)]
+    pub cfg: SerialCfg,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub favorite: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Entry {
     Folder(Folder),
     Ssh(Ssh),
     Shell(Shell),
+    Serial(Serial),
 }
 
 impl Entry {
@@ -95,6 +112,7 @@ impl Entry {
             Entry::Folder(f) => &f.name,
             Entry::Ssh(s) => &s.name,
             Entry::Shell(s) => &s.name,
+            Entry::Serial(s) => &s.name,
         }
     }
 
@@ -103,6 +121,7 @@ impl Entry {
             Entry::Folder(f) => f.color.as_deref(),
             Entry::Ssh(s) => s.color.as_deref(),
             Entry::Shell(s) => s.color.as_deref(),
+            Entry::Serial(s) => s.color.as_deref(),
         }
     }
 
@@ -111,6 +130,7 @@ impl Entry {
             Entry::Folder(f) => f.name = name,
             Entry::Ssh(s) => s.name = name,
             Entry::Shell(s) => s.name = name,
+            Entry::Serial(s) => s.name = name,
         }
     }
 
@@ -119,6 +139,7 @@ impl Entry {
             Entry::Folder(_) => {}
             Entry::Ssh(s) => s.favorite = on,
             Entry::Shell(s) => s.favorite = on,
+            Entry::Serial(s) => s.favorite = on,
         }
     }
 
@@ -135,6 +156,7 @@ impl Entry {
             Entry::Folder(_) => false,
             Entry::Ssh(s) => s.favorite,
             Entry::Shell(s) => s.favorite,
+            Entry::Serial(s) => s.favorite,
         }
     }
 }
@@ -204,6 +226,7 @@ fn ssh_launch(s: &Ssh, opts: &SshOpts) -> Result<Launch, String> {
     }
     let mut l = Launch::ssh(args, &target);
     l.title = s.name.clone();
+    l.keyring = !s.no_store;
     Ok(l)
 }
 
@@ -233,6 +256,12 @@ pub fn resolve(root: &[Entry], path: &[usize]) -> Result<Launch, String> {
         Some(Entry::Ssh(s)) => ssh_launch(s, &s.opts.inherit(&opts)),
         Some(Entry::Shell(s)) => {
             let mut l = Launch::shell(s.dir.as_deref().map(expand));
+            l.title = s.name.clone();
+            Ok(l)
+        }
+        Some(Entry::Serial(s)) => {
+            s.cfg.check().map_err(|e| format!("'{}': {e}", s.name))?;
+            let mut l = Launch::serial(s.cfg.clone());
             l.title = s.name.clone();
             Ok(l)
         }
@@ -477,12 +506,22 @@ defaults = { user = "root", jump = "gw", port = 2222 }
 type = "shell"
 name = "Work"
 dir = "/tmp"
+
+[[node]]
+type = "serial"
+name = "UART4"
+device = "/dev/ttyS4"
+baud = 921600
+eol = "crlf"
 "#;
 
     #[test]
     fn parse_sample() {
         let root = parse(SAMPLE).expect("parse");
-        assert_eq!(root.len(), 2);
+        assert_eq!(root.len(), 3);
+        let l = resolve(&root, &[2]).expect("serial");
+        assert_eq!(l.target, "/dev/ttyS4 921600 8N1");
+        assert_eq!(l.title, "UART4");
         let Entry::Folder(f) = &root[0] else { panic!("folder") };
         assert_eq!(f.children.len(), 2);
         assert!(f.children[0].favorite());
@@ -562,18 +601,18 @@ dir = "/tmp"
 
         // Shell into the folder that sits before it.
         st.move_to(&[1], &[0], Some(0)).expect("into");
-        assert_eq!(names(&st.root), ["Lab"]);
+        assert_eq!(names(&st.root), ["Lab", "UART4"]);
         let Some(Entry::Folder(f)) = st.get(&[0]) else { panic!("folder") };
         assert_eq!(names(&f.children), ["Work", "Other", "T153 board"]);
 
         // Out to root end.
         st.move_to(&[0, 2], &[], None).expect("out");
-        assert_eq!(names(&st.root), ["Lab", "T153 board"]);
+        assert_eq!(names(&st.root), ["Lab", "UART4", "T153 board"]);
 
         // Folder into itself is refused and nothing changes.
         assert!(st.move_to(&[0], &[0], None).is_err());
         assert!(st.move_to(&[7], &[], None).is_err());
-        assert_eq!(names(&st.root), ["Lab", "T153 board"]);
+        assert_eq!(names(&st.root), ["Lab", "UART4", "T153 board"]);
     }
 
     #[test]

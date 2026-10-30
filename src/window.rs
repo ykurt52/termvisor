@@ -11,9 +11,11 @@ use gtk::{gio, glib};
 use vte::prelude::*;
 
 use crate::dock;
+use crate::editor;
 use crate::palette;
 use crate::pane;
 use crate::recent::{self, Recent};
+use crate::serial::SerialCfg;
 use crate::sessions::{self, Quick};
 use crate::sidebar::{OpenFn, Sidebar};
 use crate::state::State;
@@ -134,16 +136,23 @@ impl Ui {
                 self.open(&Launch::ssh(args, &target), true);
                 self.quick.set_text("");
             }
-            Some(Quick::Serial(_)) => self.toast("Serial ports arrive in milestone 4"),
-            None => self.toast("Use user@host[:port], ssh <args> or /dev/ttyX"),
+            Some(Quick::Serial { device, baud }) => {
+                let mut cfg = SerialCfg { device, ..Default::default() };
+                if let Some(b) = baud {
+                    cfg.baud = b;
+                }
+                self.open(&Launch::serial(cfg), true);
+                self.quick.set_text("");
+            }
+            None => self.toast("Use user@host[:port], ssh <args> or /dev/ttyX[@baud]"),
         }
     }
 }
 
 fn open_tab(view: &adw::TabView, state: &Rc<State>, launch: &Launch) {
-    let t = pane::open(state, launch);
+    let (t, leaf) = pane::open(state, launch);
     let root = pane::root();
-    root.append(&term::leaf(&t));
+    root.append(&leaf);
     let page = view.append(&root);
     page.set_title(&launch.title);
     page.set_icon(Some(&gio::ThemedIcon::new(launch.kind.icon())));
@@ -376,6 +385,12 @@ fn add_actions(ui: &Ui) {
     action(ui, "find-session", None, |u, _| {
         let items = sessions::flat(&sessions::base(&u.state.store.borrow().root));
         palette::open(&u.win, items, u.pick.clone());
+    });
+    action(ui, "new-serial", None, |u, _| {
+        let cfg = editor::default_serial();
+        let name = cfg.device.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("Serial").to_string();
+        let init = Entry::Serial(store::Serial { name, cfg, ..Default::default() });
+        editor::open(&u.win, &u.state, editor::Mode::New(Vec::new()), init);
     });
     action(ui, "import", None, |u, _| u.import());
     action(ui, "export", None, |u, _| u.export());

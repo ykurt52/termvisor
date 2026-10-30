@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use gtk::glib;
 use serde::{Deserialize, Serialize};
 
+use crate::serial::SerialCfg;
 use crate::store;
 use crate::term::{Kind, Launch};
 
@@ -22,26 +23,29 @@ pub struct Recent {
     pub ssh: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<SerialCfg>,
 }
 
 impl Recent {
     pub fn of(l: &Launch) -> Self {
         let ssh = (l.kind == Kind::Ssh).then(|| l.argv.iter().skip(1).cloned().collect());
-        Self { title: l.title.clone(), target: l.target.clone(), ssh, dir: l.dir.clone() }
+        Self { title: l.title.clone(), target: l.target.clone(), ssh, dir: l.dir.clone(), serial: l.serial.clone() }
     }
 
     /// Rebuilt launch. The program is always ssh or the user shell.
     pub fn launch(&self) -> Launch {
-        let mut l = match &self.ssh {
-            Some(args) => Launch::ssh(args.clone(), &self.target),
-            None => Launch::shell(self.dir.clone()),
+        let mut l = match (&self.ssh, &self.serial) {
+            (Some(args), _) => Launch::ssh(args.clone(), &self.target),
+            (None, Some(cfg)) => Launch::serial(cfg.clone()),
+            (None, None) => Launch::shell(self.dir.clone()),
         };
         l.title = self.title.clone();
         l
     }
 
     fn same(&self, o: &Recent) -> bool {
-        self.ssh == o.ssh && self.dir == o.dir && self.title == o.title
+        self.ssh == o.ssh && self.dir == o.dir && self.title == o.title && self.serial == o.serial
     }
 }
 

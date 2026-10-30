@@ -1,17 +1,22 @@
 // Terminal creation and child process launch.
 
-use std::path::Path;
+use std::fs;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk::{gio, glib, pango, prelude::*};
 use vte::prelude::*;
 
+use crate::askpass;
+use crate::serial::SerialCfg;
 use crate::state::State;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Shell,
     Ssh,
+    Serial,
 }
 
 impl Kind {
@@ -19,6 +24,7 @@ impl Kind {
         match self {
             Kind::Shell => "Shell",
             Kind::Ssh => "SSH",
+            Kind::Serial => "Serial",
         }
     }
 
@@ -26,6 +32,7 @@ impl Kind {
         match self {
             Kind::Shell => "utilities-terminal-symbolic",
             Kind::Ssh => "network-server-symbolic",
+            Kind::Serial => "media-removable-symbolic",
         }
     }
 }
@@ -38,6 +45,10 @@ pub struct Launch {
     pub dir: Option<String>,
     pub title: String,
     pub target: String,
+    /// Allow the keyring for passwords (ssh only).
+    pub keyring: bool,
+    /// Port settings (serial only).
+    pub serial: Option<SerialCfg>,
 }
 
 impl Launch {
@@ -48,6 +59,8 @@ impl Launch {
             dir,
             title: "Shell".into(),
             target: "local".into(),
+            keyring: false,
+            serial: None,
         }
     }
 
@@ -61,6 +74,21 @@ impl Launch {
             dir: None,
             title: target.to_string(),
             target: target.to_string(),
+            keyring: true,
+            serial: None,
+        }
+    }
+
+    pub fn serial(cfg: SerialCfg) -> Self {
+        let name = cfg.device.rsplit('/').next().unwrap_or(&cfg.device).to_string();
+        Self {
+            kind: Kind::Serial,
+            argv: Vec::new(),
+            dir: None,
+            title: name,
+            target: format!("{} {}", cfg.device, cfg.summary()),
+            keyring: false,
+            serial: Some(cfg),
         }
     }
 }
@@ -96,9 +124,59 @@ pub fn spawn(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
     term
 }
 
+/// Socket dir for ssh connection sharing, created 0700. None if unusable.
+fn mux_dir() -> Option<PathBuf> {
+    let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join("termvisor");
+    // Unix socket paths are limited to ~108 bytes; %C expands to 40 chars.
+    if dir.as_os_str().len() > 60 {
+        return None;
+    }
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).ok()?;
+    Some(dir)
+}
+
+/// Final argv and extra environment for `launch`.
+fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
+    let mut argv = launch.argv.clone();
+    let mut env = Vec::new();
+    if launch.kind != Kind::Ssh {
+        return (argv, env);
+    }
+    if let Some(dir) = mux_dir() {
+        let opts = [
+            "-o".to_string(),
+            "ControlMaster=auto".into(),
+            "-o".into(),
+            format!("ControlPath={}/cm-%C", dir.display()),
+            "-o".into(),
+            "ControlPersist=60".into(),
+        ];
+        argv.splice(1..1, opts);
+    }
+    match std::env::current_exe() {
+        Ok(exe) => {
+            env.push(format!("SSH_ASKPASS={}", exe.display()));
+            env.push("SSH_ASKPASS_REQUIRE=force".into());
+            env.push(format!("{}=1", askpass::ENV_MODE));
+            env.push(format!("{}={}", askpass::ENV_TARGET, launch.target));
+            if !launch.keyring {
+                env.push(format!("{}=1", askpass::ENV_NO_STORE));
+            }
+        }
+        Err(e) => crate::warn(&format!("askpass disabled: {e}")),
+    }
+    (argv, env)
+}
+
 /// Starts (or restarts) the child process of `term`.
 pub fn run(term: &vte::Terminal, launch: &Launch) {
-    let argv: Vec<&str> = launch.argv.iter().map(String::as_str).collect();
+    // Serial panes have no child process; the serial pane feeds them.
+    if launch.kind == Kind::Serial {
+        return;
+    }
+    let (full, env) = command(launch);
+    let argv: Vec<&str> = full.iter().map(String::as_str).collect();
+    let envv: Vec<&str> = env.iter().map(String::as_str).collect();
     let dir = launch
         .dir
         .clone()
@@ -109,7 +187,7 @@ pub fn run(term: &vte::Terminal, launch: &Launch) {
         vte::PtyFlags::DEFAULT,
         Some(&dir),
         &argv,
-        &[],
+        &envv,
         glib::SpawnFlags::SEARCH_PATH,
         || {},
         -1,
@@ -125,8 +203,8 @@ pub fn run(term: &vte::Terminal, launch: &Launch) {
     );
 }
 
-/// Wraps a terminal in a scrollable leaf widget.
-pub fn leaf(term: &vte::Terminal) -> gtk::ScrolledWindow {
+/// Wraps a terminal in a scrolled window.
+pub fn scroll(term: &vte::Terminal) -> gtk::ScrolledWindow {
     let sw = gtk::ScrolledWindow::new();
     sw.set_hscrollbar_policy(gtk::PolicyType::Never);
     sw.set_hexpand(true);

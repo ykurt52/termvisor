@@ -6,7 +6,7 @@ use gtk::prelude::*;
 const CARDS: &[(&str, &str, &str, &str, Option<&str>)] = &[
     ("utilities-terminal-symbolic", "tint-blue", "Local Shell", "win.new-tab", None),
     ("network-server-symbolic", "tint-green", "SSH", "win.quick-connect", None),
-    ("drive-harddisk-symbolic", "tint-yellow", "Serial", "win.soon", Some("Serial ports arrive in milestone 4")),
+    ("media-removable-symbolic", "tint-yellow", "Serial", "win.new-serial", None),
     ("network-wired-symbolic", "tint-red", "Telnet", "win.soon", Some("Telnet arrives in milestone 6")),
     ("network-transmit-receive-symbolic", "tint-magenta", "Raw TCP", "win.soon", Some("Raw TCP arrives in milestone 6")),
     ("folder-symbolic", "tint-cyan", "FTP", "win.soon", Some("FTP arrives in milestone 7")),
@@ -49,7 +49,7 @@ pub fn build() -> adw::StatusPage {
     }
 
     let hint = gtk::Label::new(Some(
-        "Ctrl+Shift+T new tab · Ctrl+Shift+K find session · Ctrl+Shift+L quick connect · Ctrl+Shift+B sidebar · Ctrl+Shift+J bottom panel",
+        "Ctrl+Shift+T new tab · Ctrl+Shift+K find session · Ctrl+Shift+L quick connect (/dev/ttyUSB0@115200) · Ctrl+Shift+B sidebar · Ctrl+Shift+J bottom panel",
     ));
     hint.add_css_class("dim-label");
     hint.set_wrap(true);

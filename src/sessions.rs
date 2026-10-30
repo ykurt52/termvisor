@@ -77,6 +77,7 @@ fn stored(root: &[Entry], list: &[Entry], prefix: &[usize]) -> Vec<Node> {
                 ),
                 Entry::Ssh(_) => ("network-server-symbolic", "tint-green", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Shell(_) => ("utilities-terminal-symbolic", "tint-blue", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Serial(_) => ("media-removable-symbolic", "tint-yellow", NodeKind::Item(store::resolve(root, &path))),
             };
             Node {
                 name: e.name().to_string(),
@@ -120,6 +121,7 @@ fn kind_look(k: Kind) -> (&'static str, &'static str) {
     match k {
         Kind::Shell => ("utilities-terminal-symbolic", "tint-blue"),
         Kind::Ssh => ("network-server-symbolic", "tint-green"),
+        Kind::Serial => ("media-removable-symbolic", "tint-yellow"),
     }
 }
 
@@ -228,17 +230,22 @@ pub fn filter(nodes: &[Node], query: &str) -> Vec<Node> {
 #[derive(Debug, PartialEq)]
 pub enum Quick {
     Ssh { args: Vec<String>, target: String },
-    Serial(String),
+    Serial { device: String, baud: Option<u32> },
 }
 
-/// Parses quick connect input: `[user@]host[:port]`, `ssh <args>` or `/dev/...`.
+/// Parses quick connect input: `[user@]host[:port]`, `ssh <args>` or
+/// `/dev/<port>[@baud]`.
 pub fn quick(input: &str) -> Option<Quick> {
     let s = input.trim();
     if s.is_empty() {
         return None;
     }
     if s.starts_with("/dev/") {
-        return Some(Quick::Serial(s.to_string()));
+        let (device, baud) = match s.split_once('@') {
+            Some((d, b)) => (d, Some(b.parse().ok().filter(|b| *b > 0)?)),
+            None => (s, None),
+        };
+        return Some(Quick::Serial { device: device.to_string(), baud });
     }
     if let Some(rest) = s.strip_prefix("ssh ") {
         let args: Vec<String> = rest.split_whitespace().map(str::to_string).collect();
@@ -286,7 +293,12 @@ mod tests {
             quick("board"),
             Some(Quick::Ssh { args: vec!["board".into()], target: "board".into() })
         );
-        assert_eq!(quick("/dev/ttyUSB0"), Some(Quick::Serial("/dev/ttyUSB0".into())));
+        assert_eq!(quick("/dev/ttyUSB0"), Some(Quick::Serial { device: "/dev/ttyUSB0".into(), baud: None }));
+        assert_eq!(
+            quick("/dev/ttyS4@921600"),
+            Some(Quick::Serial { device: "/dev/ttyS4".into(), baud: Some(921_600) })
+        );
+        assert_eq!(quick("/dev/ttyS4@fast"), None);
         assert_eq!(quick("-oProxyCommand=x"), None);
         assert_eq!(quick("   "), None);
     }

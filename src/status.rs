@@ -36,7 +36,7 @@ impl Status {
     }
 
     pub fn show(&self, launch: Option<&Launch>, theme: &str) {
-        for c in ["kind-shell", "kind-ssh"] {
+        for c in ["kind-shell", "kind-ssh", "kind-serial"] {
             self.bar.remove_css_class(c);
         }
         match launch {
@@ -44,6 +44,7 @@ impl Status {
                 self.bar.add_css_class(match l.kind {
                     Kind::Shell => "kind-shell",
                     Kind::Ssh => "kind-ssh",
+                    Kind::Serial => "kind-serial",
                 });
                 self.icon.set_icon_name(Some(l.kind.icon()));
                 self.icon.set_visible(true);

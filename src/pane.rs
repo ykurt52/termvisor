@@ -8,6 +8,7 @@ use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use vte::prelude::*;
 
+use crate::serialpane;
 use crate::state::State;
 use crate::term::{self, Kind, Launch};
 
@@ -85,11 +86,52 @@ pub fn find(w: &gtk::Widget) -> Option<vte::Terminal> {
     None
 }
 
-/// Creates a terminal with title and exit hooks.
+const HOST_KEY_BANNER: &str = "\r\n\x1b[1;37;41m HOST KEY CHANGED \x1b[0m\x1b[1;31m The server key differs from known_hosts. \
+This can be a reinstalled server or an attack. Verify the new fingerprint out of band, \
+then remove the old key with: ssh-keygen -R <host>\x1b[0m\r\n";
+
+/// True when ssh reported a changed host key on screen.
+fn host_key_changed(t: &vte::Terminal) -> bool {
+    t.text_format(vte::Format::Text)
+        .is_some_and(|s| s.contains("REMOTE HOST IDENTIFICATION HAS CHANGED"))
+}
+
+const LEAF_CLASS: &str = "leaf";
+
+/// Pane widget that holds `term` (its direct child of a Paned or root).
+fn leaf_of(term: &vte::Terminal) -> Option<gtk::Widget> {
+    let mut cur = term.parent();
+    while let Some(w) = cur {
+        if w.has_css_class(LEAF_CLASS) {
+            return Some(w);
+        }
+        cur = w.parent();
+    }
+    None
+}
+
+/// Creates a pane for `launch`. Returns the terminal and the leaf widget
+/// to insert into the layout.
+pub fn open(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) {
+    let (t, leaf) = match &launch.serial {
+        Some(cfg) => serialpane::build(state, launch, cfg.clone()),
+        None => {
+            let t = hooked(state, launch);
+            let leaf = term::scroll(&t).upcast::<gtk::Widget>();
+            (t, leaf)
+        }
+    };
+    leaf.add_css_class(LEAF_CLASS);
+    leaf.set_hexpand(true);
+    leaf.set_vexpand(true);
+    (t, leaf)
+}
+
+/// Terminal with title and exit hooks.
 ///
 /// A local shell closes its pane on exit. Other sessions stay open and
 /// restart on Enter.
-pub fn open(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
+fn hooked(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
     let t = term::spawn(state, launch);
     t.connect_window_title_changed(|t| {
         let Some(title) = t.window_title() else {
@@ -112,6 +154,9 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
     let flag = dead.clone();
     t.connect_child_exited(move |t, status| {
         flag.set(true);
+        if host_key_changed(t) {
+            t.feed(HOST_KEY_BANNER.as_bytes());
+        }
         let msg = format!(
             "\r\n\x1b[33m[session ended, status {status}] Enter: reconnect, Ctrl+Shift+W: close\x1b[0m\r\n"
         );
@@ -129,7 +174,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
 
 /// Splits the pane of `term`, new terminal goes right or below.
 pub fn split(state: &Rc<State>, term: &vte::Terminal, dir: gtk::Orientation) -> Option<vte::Terminal> {
-    let leaf = term.parent()?;
+    let leaf = leaf_of(term)?;
     let size = match dir {
         gtk::Orientation::Horizontal => leaf.width(),
         _ => leaf.height(),
@@ -140,9 +185,9 @@ pub fn split(state: &Rc<State>, term: &vte::Terminal, dir: gtk::Orientation) -> 
     paned.set_wide_handle(true);
     paned.set_hexpand(true);
     paned.set_vexpand(true);
-    let fresh = open(state, &Launch::shell(term::cwd(term)));
+    let (fresh, fresh_leaf) = open(state, &Launch::shell(term::cwd(term)));
     paned.set_start_child(Some(&leaf));
-    paned.set_end_child(Some(&term::leaf(&fresh)));
+    paned.set_end_child(Some(&fresh_leaf));
     if size > 0 {
         paned.set_position(size / 2);
     }
@@ -153,7 +198,7 @@ pub fn split(state: &Rc<State>, term: &vte::Terminal, dir: gtk::Orientation) -> 
 
 /// Closes the pane of `term`; closes the tab when it was the last pane.
 pub fn close(term: &vte::Terminal) {
-    let Some(leaf) = term.parent() else {
+    let Some(leaf) = leaf_of(term) else {
         return;
     };
     let owner = page_of(leaf.upcast_ref());

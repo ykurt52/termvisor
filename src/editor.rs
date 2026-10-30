@@ -1,16 +1,26 @@
 // Session and folder editor dialog.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::gio;
 
+use crate::serial::{self, Eol, Flow, Parity, SerialCfg};
 use crate::state::State;
 use crate::store::{self, Entry, Folder, Shell, Ssh, SshOpts};
 
 const COLORS: &[&str] = &["Default", "Blue", "Green", "Yellow", "Red", "Magenta", "Cyan"];
 const TRISTATE: &[&str] = &["Inherit", "On", "Off"];
-const KINDS: &[&str] = &["SSH", "Shell"];
+const KINDS: &[&str] = &["SSH", "Shell", "Serial"];
+const BAUDS: &[u32] = &[
+    1200, 2400, 4800, 9600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600, 1_000_000, 1_500_000,
+    2_000_000, 3_000_000,
+];
+const DATA_BITS: &[&str] = &["5", "6", "7", "8"];
+const PARITY: &[&str] = &["None", "Odd", "Even"];
+const STOP_BITS: &[&str] = &["1", "2"];
+const FLOW: &[&str] = &["None", "XON/XOFF", "RTS/CTS"];
 
 /// Where the result goes.
 pub enum Mode {
@@ -24,6 +34,7 @@ pub enum Mode {
 enum Kind {
     Ssh,
     Shell,
+    Serial,
     Folder,
 }
 
@@ -44,6 +55,176 @@ fn combo(title: &str, items: &[&str]) -> adw::ComboRow {
 fn text(r: &adw::EntryRow) -> Option<String> {
     let t = r.text().trim().to_string();
     (!t.is_empty()).then_some(t)
+}
+
+/// Adds a drop-down to `row` that fills it from `items()` (label, value),
+/// rebuilt each time it opens.
+fn chooser(row: &adw::EntryRow, tip: &str, items: impl Fn() -> Vec<(String, String)> + 'static) {
+    let list = gtk::ListBox::new();
+    list.add_css_class("navigation-sidebar");
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_max_content_height(320);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_propagate_natural_width(true);
+    scroll.set_child(Some(&list));
+    let pop = gtk::Popover::new();
+    pop.set_child(Some(&scroll));
+
+    let btn = gtk::MenuButton::new();
+    btn.set_icon_name("pan-down-symbolic");
+    btn.add_css_class("flat");
+    btn.set_valign(gtk::Align::Center);
+    btn.set_tooltip_text(Some(tip));
+    btn.set_popover(Some(&pop));
+    row.add_suffix(&btn);
+
+    let values: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (l, vals) = (list.clone(), values.clone());
+    pop.connect_show(move |_| {
+        l.remove_all();
+        let mut vs = vals.borrow_mut();
+        vs.clear();
+        let found = items();
+        if found.is_empty() {
+            let none = gtk::Label::new(Some("Nothing found"));
+            none.add_css_class("dim-label");
+            l.append(&none);
+        }
+        for (label, value) in found {
+            let lab = gtk::Label::new(Some(&label));
+            lab.set_xalign(0.0);
+            l.append(&lab);
+            vs.push(value);
+        }
+    });
+    let (r, p) = (row.clone(), pop.clone());
+    list.connect_row_activated(move |_, item| {
+        let Ok(i) = usize::try_from(item.index()) else { return };
+        if let Some(v) = values.borrow().get(i) {
+            r.set_text(v);
+            p.popdown();
+        }
+    });
+}
+
+/// Serial port rows.
+#[derive(Clone)]
+struct SerialRows {
+    group: adw::PreferencesGroup,
+    device: adw::EntryRow,
+    baud: adw::EntryRow,
+    data: adw::ComboRow,
+    parity: adw::ComboRow,
+    stop: adw::ComboRow,
+    flow: adw::ComboRow,
+    eol: adw::ComboRow,
+    echo: adw::SwitchRow,
+    hex: adw::SwitchRow,
+    reconnect: adw::SwitchRow,
+}
+
+fn switch(title: &str, sub: &str) -> adw::SwitchRow {
+    let r = adw::SwitchRow::new();
+    r.set_title(title);
+    r.set_subtitle(sub);
+    r
+}
+
+impl SerialRows {
+    fn new() -> Self {
+        let eols: Vec<&str> = Eol::ALL.iter().map(|e| e.label()).collect();
+        let rows = Self {
+            group: adw::PreferencesGroup::new(),
+            device: entry_row("Device"),
+            baud: entry_row("Baud Rate"),
+            data: combo("Data Bits", DATA_BITS),
+            parity: combo("Parity", PARITY),
+            stop: combo("Stop Bits", STOP_BITS),
+            flow: combo("Flow Control", FLOW),
+            eol: combo("Enter Sends", &eols),
+            echo: switch("Local Echo", "Show typed text locally"),
+            hex: switch("Hex View", "Start with incoming bytes shown as hex"),
+            reconnect: switch("Auto Reconnect", "Reopen the port when the device comes back"),
+        };
+        rows.group.set_title("Serial Port");
+        rows.baud.set_input_purpose(gtk::InputPurpose::Digits);
+        chooser(&rows.device, "Detected Ports", || {
+            serial::ports().into_iter().map(|p| (p.label, p.path)).collect()
+        });
+        chooser(&rows.baud, "Common Rates", || {
+            BAUDS.iter().map(|b| (b.to_string(), b.to_string())).collect()
+        });
+        for r in [
+            rows.device.upcast_ref::<gtk::Widget>(),
+            rows.baud.upcast_ref(),
+            rows.data.upcast_ref(),
+            rows.parity.upcast_ref(),
+            rows.stop.upcast_ref(),
+            rows.flow.upcast_ref(),
+            rows.eol.upcast_ref(),
+            rows.echo.upcast_ref(),
+            rows.hex.upcast_ref(),
+            rows.reconnect.upcast_ref(),
+        ] {
+            rows.group.add(r);
+        }
+        rows
+    }
+
+    fn set(&self, c: &SerialCfg) {
+        self.device.set_text(&c.device);
+        self.baud.set_text(&c.baud.to_string());
+        self.data.set_selected(u32::from(c.data_bits.clamp(5, 8) - 5));
+        self.parity.set_selected(match c.parity {
+            Parity::None => 0,
+            Parity::Odd => 1,
+            Parity::Even => 2,
+        });
+        self.stop.set_selected(if c.stop_bits == 2 { 1 } else { 0 });
+        self.flow.set_selected(match c.flow {
+            Flow::None => 0,
+            Flow::Software => 1,
+            Flow::Hardware => 2,
+        });
+        self.eol.set_selected(Eol::ALL.iter().position(|e| *e == c.eol).unwrap_or(0) as u32);
+        self.echo.set_active(c.echo);
+        self.hex.set_active(c.hex);
+        self.reconnect.set_active(c.reconnect);
+    }
+
+    fn get(&self) -> Result<SerialCfg, String> {
+        let device = text(&self.device).ok_or("Device is required")?;
+        let baud = text(&self.baud)
+            .and_then(|b| b.parse::<u32>().ok())
+            .filter(|b| *b > 0)
+            .ok_or("Baud rate must be a positive number")?;
+        let c = SerialCfg {
+            device,
+            baud,
+            data_bits: 5 + self.data.selected().min(3) as u8,
+            parity: match self.parity.selected() {
+                1 => Parity::Odd,
+                2 => Parity::Even,
+                _ => Parity::None,
+            },
+            stop_bits: if self.stop.selected() == 1 { 2 } else { 1 },
+            flow: match self.flow.selected() {
+                1 => Flow::Software,
+                2 => Flow::Hardware,
+                _ => Flow::None,
+            },
+            eol: Eol::ALL.get(self.eol.selected() as usize).copied().unwrap_or_default(),
+            echo: self.echo.is_active(),
+            hex: self.hex.is_active(),
+            reconnect: self.reconnect.is_active(),
+        };
+        c.check()?;
+        Ok(c)
+    }
+
+    fn texts(&self) -> [&adw::EntryRow; 2] {
+        [&self.device, &self.baud]
+    }
 }
 
 /// SSH option rows, shared by sessions and folder defaults.
@@ -143,11 +324,13 @@ struct Form {
     name: adw::EntryRow,
     color: adw::ComboRow,
     favorite: adw::SwitchRow,
+    remember: adw::SwitchRow,
     conn: adw::PreferencesGroup,
     host: adw::EntryRow,
     opts: OptRows,
     shell: adw::PreferencesGroup,
     dir: adw::EntryRow,
+    serial: SerialRows,
     folder: bool,
 }
 
@@ -155,20 +338,24 @@ impl Form {
     fn kind(&self) -> Kind {
         if self.folder {
             Kind::Folder
-        } else if self.kind.selected() == 1 {
-            Kind::Shell
         } else {
-            Kind::Ssh
+            match self.kind.selected() {
+                1 => Kind::Shell,
+                2 => Kind::Serial,
+                _ => Kind::Ssh,
+            }
         }
     }
 
     fn sync(&self) {
         let k = self.kind();
         self.host.set_visible(k == Kind::Ssh);
-        self.conn.set_visible(k != Kind::Shell);
+        self.conn.set_visible(k == Kind::Ssh || k == Kind::Folder);
+        self.serial.group.set_visible(k == Kind::Serial);
         self.conn.set_title(if k == Kind::Folder { "Defaults for Sessions Inside" } else { "Connection" });
         self.shell.set_visible(k == Kind::Shell);
         self.favorite.set_visible(k != Kind::Folder);
+        self.remember.set_visible(k == Kind::Ssh);
     }
 
     fn load(&self, e: &Entry) {
@@ -184,10 +371,15 @@ impl Form {
                 self.kind.set_selected(0);
                 self.host.set_text(&s.host);
                 self.opts.set(&s.opts);
+                self.remember.set_active(!s.no_store);
             }
             Entry::Shell(s) => {
                 self.kind.set_selected(1);
                 self.dir.set_text(s.dir.as_deref().unwrap_or(""));
+            }
+            Entry::Serial(s) => {
+                self.kind.set_selected(2);
+                self.serial.set(&s.cfg);
             }
             Entry::Folder(f) => self.opts.set(&f.defaults),
         }
@@ -207,8 +399,10 @@ impl Form {
                 opts: self.opts.get()?,
                 color,
                 favorite,
+                no_store: !self.remember.is_active(),
             }),
             Kind::Shell => Entry::Shell(Shell { name, dir: text(&self.dir), color, favorite }),
+            Kind::Serial => Entry::Serial(store::Serial { name, cfg: self.serial.get()?, color, favorite }),
             Kind::Folder => Entry::Folder(Folder {
                 name,
                 color,
@@ -224,6 +418,12 @@ impl Form {
     }
 }
 
+/// Serial defaults with the first detected port.
+pub fn default_serial() -> SerialCfg {
+    let device = serial::ports().into_iter().next().map(|p| p.path).unwrap_or_default();
+    SerialCfg { device, ..Default::default() }
+}
+
 /// Opens the editor for `init` and saves into `state` on Save.
 pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init: Entry) {
     let folder = matches!(init, Entry::Folder(_));
@@ -235,15 +435,21 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
         name: entry_row("Name"),
         color: combo("Color", COLORS),
         favorite: adw::SwitchRow::new(),
+        remember: adw::SwitchRow::new(),
         conn: adw::PreferencesGroup::new(),
         host: entry_row("Host"),
         opts: OptRows::new(),
         shell: adw::PreferencesGroup::new(),
         dir: entry_row("Working Directory"),
+        serial: SerialRows::new(),
         folder,
     };
     form.conn.add(&form.host);
     form.opts.add_to(&form.conn);
+    form.remember.set_title("Remember Password");
+    form.remember.set_subtitle("Store passwords and passphrases in the system keyring");
+    form.remember.set_active(true);
+    form.conn.add(&form.remember);
     form.favorite.set_title("Favorite");
     form.shell.set_title("Shell");
     form.shell.add(&form.dir);
@@ -260,7 +466,9 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     page.add(&general);
     page.add(&form.conn);
     page.add(&form.shell);
+    page.add(&form.serial.group);
 
+    form.serial.set(&default_serial());
     form.load(&init);
     form.sync();
     let f = form.clone();
@@ -317,6 +525,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     // Enter in any text row saves.
     let mut texts = vec![&form.name, &form.host, &form.dir];
     texts.extend(form.opts.texts());
+    texts.extend(form.serial.texts());
     for r in texts {
         let s = submit.clone();
         r.connect_entry_activated(move |_| s());

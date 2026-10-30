@@ -1,11 +1,15 @@
 // termvisor entry point.
 
+mod askpass;
 mod dock;
 mod editor;
+mod keyring;
 mod palette;
 mod pane;
 mod recent;
 mod sessions;
+mod serial;
+mod serialpane;
 mod settings;
 mod sidebar;
 mod state;
@@ -31,6 +35,12 @@ pub fn warn(msg: &str) {
 }
 
 fn main() -> glib::ExitCode {
+    // ssh calls us as SSH_ASKPASS with the prompt as the only argument.
+    let args: Vec<String> = std::env::args().collect();
+    if std::env::var_os(askpass::ENV_MODE).is_some() && args.len() == 2 {
+        return askpass::run(&args[1]);
+    }
+
     if let Err(e) = gio::resources_register_include!("termvisor.gresource") {
         warn(&format!("resources: {e}"));
     }
