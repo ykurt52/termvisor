@@ -1,12 +1,16 @@
 // termvisor entry point.
 
 mod dock;
+mod editor;
+mod palette;
 mod pane;
+mod recent;
 mod sessions;
 mod settings;
 mod sidebar;
 mod state;
 mod status;
+mod store;
 mod term;
 mod theme;
 mod welcome;

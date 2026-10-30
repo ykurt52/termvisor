@@ -11,9 +11,10 @@ use gtk::{gio, glib};
 use vte::prelude::*;
 
 use crate::dock;
+use crate::palette;
 use crate::pane;
 use crate::sessions::{self, Quick};
-use crate::sidebar::Sidebar;
+use crate::sidebar::{OpenFn, Sidebar};
 use crate::state::State;
 use crate::status::Status;
 use crate::term::{self, Launch};
@@ -33,6 +34,7 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.toggle-sidebar", &["<Ctrl><Shift>b"]),
     ("win.toggle-dock", &["<Ctrl><Shift>j"]),
     ("win.quick-connect", &["<Ctrl><Shift>l"]),
+    ("win.find-session", &["<Ctrl><Shift>k"]),
 ];
 
 /// Widgets the actions need.
@@ -46,6 +48,8 @@ struct Ui {
     quick: gtk::Entry,
     toasts: adw::ToastOverlay,
     state: Rc<State>,
+    /// Opens a session from a list, with error toast and recent tracking.
+    pick: OpenFn,
 }
 
 impl Ui {
@@ -61,8 +65,12 @@ impl Ui {
         focused.or_else(|| self.view.selected_page().and_then(|p| pane::find(&p.child())))
     }
 
-    fn open(&self, launch: &Launch) {
+    /// Opens a tab; `remember` adds it to the recent list.
+    fn open(&self, launch: &Launch, remember: bool) {
         open_tab(&self.view, &self.state, launch);
+        if remember {
+            self.state.remember(launch);
+        }
     }
 
     fn refresh_status(&self) {
@@ -75,7 +83,7 @@ impl Ui {
         let text = self.quick.text();
         match sessions::quick(&text) {
             Some(Quick::Ssh { args, target }) => {
-                self.open(&Launch::ssh(args, &target));
+                self.open(&Launch::ssh(args, &target), true);
                 self.quick.set_text("");
             }
             Some(Quick::Serial(_)) => self.toast("Serial ports arrive in milestone 4"),
@@ -160,12 +168,21 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
 
     let weak = view.downgrade();
     let st = state.clone();
-    let open_cb: Rc<dyn Fn(Launch)> = Rc::new(move |launch: Launch| {
-        if let Some(v) = weak.upgrade() {
-            open_tab(&v, &st, &launch);
+    let tw = toasts.downgrade();
+    let open_cb: OpenFn = Rc::new(move |launch: Result<Launch, String>| match launch {
+        Ok(l) => {
+            if let Some(v) = weak.upgrade() {
+                open_tab(&v, &st, &l);
+                st.remember(&l);
+            }
+        }
+        Err(e) => {
+            if let Some(t) = tw.upgrade() {
+                t.add_toast(adw::Toast::new(&e));
+            }
         }
     });
-    let sidebar = Sidebar::new(open_cb);
+    let sidebar = Sidebar::new(state, open_cb.clone());
 
     let hsplit = gtk::Paned::new(gtk::Orientation::Horizontal);
     hsplit.set_start_child(Some(&sidebar.panel));
@@ -192,6 +209,7 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         quick: quick.clone(),
         toasts,
         state: state.clone(),
+        pick: open_cb,
     };
     add_actions(&ui);
 
@@ -237,6 +255,7 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     panes.append(Some("Close Pane"), Some("win.close-pane"));
 
     let view = gio::Menu::new();
+    view.append(Some("Find Session…"), Some("win.find-session"));
     view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
     view.append(Some("Toggle Bottom Panel"), Some("win.toggle-dock"));
 
@@ -278,7 +297,11 @@ where
 fn add_actions(ui: &Ui) {
     action(ui, "new-tab", None, |u, _| {
         let dir = u.active().and_then(|t| term::cwd(&t));
-        u.open(&Launch::shell(dir));
+        u.open(&Launch::shell(dir), false);
+    });
+    action(ui, "find-session", None, |u, _| {
+        let items = sessions::flat(&sessions::base(&u.state.store.borrow().root));
+        palette::open(&u.win, items, u.pick.clone());
     });
     action(ui, "quick-connect", None, |u, _| {
         u.quick.grab_focus();

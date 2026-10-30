@@ -6,13 +6,18 @@ use std::rc::Rc;
 use gtk::{gdk, glib, prelude::*};
 use vte::prelude::*;
 
+use crate::recent::{self, Recent};
 use crate::settings::{self, Settings};
+use crate::store::Store;
 use crate::term::Launch;
 use crate::theme::{self, Theme};
 
 pub struct State {
     pub themes: Vec<Theme>,
     pub cfg: RefCell<Settings>,
+    pub store: RefCell<Store>,
+    pub recent: RefCell<Vec<Recent>>,
+    listeners: RefCell<Vec<Box<dyn Fn()>>>,
     terms: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Launch)>>,
     css: gtk::CssProvider,
 }
@@ -34,6 +39,9 @@ impl State {
         let state = Rc::new(Self {
             themes: theme::load(&settings::dir().join("themes")),
             cfg: RefCell::new(Settings::load()),
+            store: RefCell::new(Store::load()),
+            recent: RefCell::new(recent::load()),
+            listeners: RefCell::new(Vec::new()),
             terms: RefCell::new(Vec::new()),
             css,
         });
@@ -56,6 +64,41 @@ impl State {
             crate::warn(&format!("save settings: {e}"));
         }
         self.apply();
+    }
+
+    /// Calls `f` whenever sessions change.
+    pub fn on_sessions(&self, f: impl Fn() + 'static) {
+        self.listeners.borrow_mut().push(Box::new(f));
+    }
+
+    /// Reloads sessions from disk and notifies listeners.
+    pub fn reload_sessions(&self) {
+        self.store.replace(Store::load());
+        self.notify();
+    }
+
+    /// Applies `f` to the store, saves and notifies listeners.
+    /// On save failure the change stays in memory and the error is returned.
+    pub fn edit_sessions(&self, f: impl FnOnce(&mut Store) -> Result<(), String>) -> Result<(), String> {
+        f(&mut self.store.borrow_mut())?;
+        let saved = self.store.borrow().save().map_err(|e| format!("save sessions: {e}"));
+        self.notify();
+        saved
+    }
+
+    /// Puts `l` on top of the recent list.
+    pub fn remember(&self, l: &Launch) {
+        recent::push(&mut self.recent.borrow_mut(), Recent::of(l));
+        if let Err(e) = recent::save(&self.recent.borrow()) {
+            crate::warn(&format!("save recent: {e}"));
+        }
+        self.notify();
+    }
+
+    fn notify(&self) {
+        for f in self.listeners.borrow().iter() {
+            f();
+        }
     }
 
     /// Registers a terminal so theme changes reach it.

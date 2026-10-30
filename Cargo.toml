@@ -13,6 +13,7 @@ adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 vte = { package = "vte4", version = "0.10", features = ["v0_76"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
 
 [build-dependencies]
 glib-build-tools = "0.22"

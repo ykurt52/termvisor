@@ -47,6 +47,7 @@ cargo build --release
 | Copy / Paste | Ctrl+Shift+C / Ctrl+Shift+V |
 | Zoom in / out / reset | Ctrl++ / Ctrl+- / Ctrl+0 |
 | Quick connect | Ctrl+Shift+L |
+| Find session | Ctrl+Shift+K |
 | Toggle sidebar | Ctrl+Shift+B |
 | Toggle bottom panel | Ctrl+Shift+J |
 | Next / previous tab | Ctrl+PgDn / Ctrl+PgUp |
@@ -61,6 +62,7 @@ An SSH pane stays open when the session ends; press Enter to reconnect.
 | Path | Content |
 |---|---|
 | `~/.config/termvisor/settings.json` | Theme, font, scrollback |
+| `~/.config/termvisor/sessions.toml` | Saved sessions, see [docs/sessions.md](docs/sessions.md) |
 | `~/.config/termvisor/themes/*.json` | User themes, see [docs/themes.md](docs/themes.md) |
 
 ## License

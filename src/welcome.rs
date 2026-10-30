@@ -49,7 +49,7 @@ pub fn build() -> adw::StatusPage {
     }
 
     let hint = gtk::Label::new(Some(
-        "Ctrl+Shift+T new tab · Ctrl+Shift+L quick connect · Ctrl+Shift+B sidebar · Ctrl+Shift+J bottom panel",
+        "Ctrl+Shift+T new tab · Ctrl+Shift+K find session · Ctrl+Shift+L quick connect · Ctrl+Shift+B sidebar · Ctrl+Shift+J bottom panel",
     ));
     hint.add_css_class("dim-label");
     hint.set_wrap(true);

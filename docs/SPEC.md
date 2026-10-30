@@ -73,7 +73,7 @@ Code must not use APIs newer than these.
 - Storage: `~/.config/termvisor/sessions.toml`. No passwords in this file.
 - Folder settings inherit to children (user, jump host, theme, etc.).
 - Quick connect bar: `user@host:port`, Enter connects without saving.
-- Fuzzy search (Ctrl+K).
+- Fuzzy search (Ctrl+Shift+K; plain Ctrl+K stays with the shell).
 - Import: hosts from `~/.ssh/config`, third-party INI-based session exports.
 - Export: TOML, JSON.
 - Recent and favorites sections.

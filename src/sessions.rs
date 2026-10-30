@@ -4,37 +4,91 @@ use std::path::Path;
 
 use gtk::glib;
 
-use crate::term::Launch;
+use crate::recent::Recent;
+use crate::store::{self, Entry};
+use crate::term::{Kind, Launch};
+
+/// Row in the session tree.
+#[derive(Clone)]
+pub struct Node {
+    pub name: String,
+    pub icon: &'static str,
+    /// CSS tint class.
+    pub tint: &'static str,
+    pub star: bool,
+    /// Index path in the store; None for built-in rows.
+    pub path: Option<Vec<usize>>,
+    /// Host alias for ~/.ssh/config rows (can be copied into the store).
+    pub host: Option<String>,
+    pub kind: NodeKind,
+}
 
 #[derive(Clone)]
-pub enum Node {
-    Folder { name: String, icon: &'static str, kids: Vec<Node> },
-    Item { name: String, icon: &'static str, launch: Launch },
+pub enum NodeKind {
+    Folder(Vec<Node>),
+    Item(Result<Launch, String>),
 }
 
 impl Node {
-    pub fn name(&self) -> &str {
-        match self {
-            Node::Folder { name, .. } | Node::Item { name, .. } => name,
-        }
+    fn item(name: &str, icon: &'static str, tint: &'static str, launch: Result<Launch, String>) -> Self {
+        Self { name: name.into(), icon, tint, star: false, path: None, host: None, kind: NodeKind::Item(launch) }
     }
 
-    pub fn icon(&self) -> &'static str {
-        match self {
-            Node::Folder { icon, .. } | Node::Item { icon, .. } => icon,
-        }
+    fn folder(name: &str, icon: &'static str, tint: &'static str, kids: Vec<Node>) -> Self {
+        Self { name: name.into(), icon, tint, star: false, path: None, host: None, kind: NodeKind::Folder(kids) }
     }
 
     /// Copy keeping only items whose name contains `query` (lowercase).
     fn filter(&self, query: &str) -> Option<Node> {
-        match self {
-            Node::Item { name, .. } => name.to_lowercase().contains(query).then(|| self.clone()),
-            Node::Folder { name, icon, kids } => {
+        match &self.kind {
+            NodeKind::Item(_) => self.name.to_lowercase().contains(query).then(|| self.clone()),
+            NodeKind::Folder(kids) => {
                 let kids: Vec<Node> = kids.iter().filter_map(|k| k.filter(query)).collect();
-                (!kids.is_empty()).then(|| Node::Folder { name: name.clone(), icon, kids })
+                (!kids.is_empty()).then(|| Node { kind: NodeKind::Folder(kids), ..self.clone() })
             }
         }
     }
+}
+
+/// Tint class for a stored color name, or `fallback`.
+fn tint(color: Option<&str>, fallback: &'static str) -> &'static str {
+    match color {
+        Some("blue") => "tint-blue",
+        Some("green") => "tint-green",
+        Some("yellow") => "tint-yellow",
+        Some("red") => "tint-red",
+        Some("magenta") => "tint-magenta",
+        Some("cyan") => "tint-cyan",
+        _ => fallback,
+    }
+}
+
+fn stored(root: &[Entry], list: &[Entry], prefix: &[usize]) -> Vec<Node> {
+    list.iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mut path = prefix.to_vec();
+            path.push(i);
+            let (icon, fallback, kind) = match e {
+                Entry::Folder(f) => (
+                    "folder-symbolic",
+                    "tint-yellow",
+                    NodeKind::Folder(stored(root, &f.children, &path)),
+                ),
+                Entry::Ssh(_) => ("network-server-symbolic", "tint-green", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Shell(_) => ("utilities-terminal-symbolic", "tint-blue", NodeKind::Item(store::resolve(root, &path))),
+            };
+            Node {
+                name: e.name().to_string(),
+                icon,
+                tint: tint(e.color(), fallback),
+                star: e.favorite(),
+                path: Some(path),
+                host: None,
+                kind,
+            }
+        })
+        .collect()
 }
 
 /// Host aliases from an ssh config file. Wildcard patterns are skipped.
@@ -62,31 +116,105 @@ pub fn ssh_hosts(path: &Path) -> Vec<String> {
     hosts
 }
 
-/// Current session tree.
-pub fn tree() -> Vec<Node> {
-    let local = Node::Item {
-        name: "Local Shell".into(),
-        icon: "utilities-terminal-symbolic",
-        launch: Launch::shell(None),
-    };
+fn kind_look(k: Kind) -> (&'static str, &'static str) {
+    match k {
+        Kind::Shell => ("utilities-terminal-symbolic", "tint-blue"),
+        Kind::Ssh => ("network-server-symbolic", "tint-green"),
+    }
+}
+
+/// Local shell, stored sessions, then ~/.ssh/config hosts.
+pub fn base(root: &[Entry]) -> Vec<Node> {
+    let mut nodes = vec![Node::item("Local Shell", "utilities-terminal-symbolic", "tint-blue", Ok(Launch::shell(None)))];
+    nodes.extend(stored(root, root, &[]));
+
     let ssh: Vec<Node> = ssh_hosts(&glib::home_dir().join(".ssh/config"))
         .into_iter()
-        .map(|h| Node::Item {
-            launch: Launch::ssh(vec![h.clone()], &h),
-            name: h,
-            icon: "network-server-symbolic",
+        .map(|h| Node {
+            host: Some(h.clone()),
+            ..Node::item(&h, "network-server-symbolic", "tint-green", Ok(Launch::ssh(vec![h.clone()], &h)))
         })
         .collect();
-
-    let mut nodes = vec![local];
     if !ssh.is_empty() {
-        nodes.push(Node::Folder {
-            name: "SSH Config".into(),
-            icon: "folder-symbolic",
-            kids: ssh,
-        });
+        nodes.push(Node::folder("SSH Config", "folder-symbolic", "tint-cyan", ssh));
     }
     nodes
+}
+
+fn starred(nodes: &[Node], out: &mut Vec<Node>) {
+    for n in nodes {
+        match &n.kind {
+            NodeKind::Folder(kids) => starred(kids, out),
+            NodeKind::Item(_) if n.star => out.push(n.clone()),
+            NodeKind::Item(_) => {}
+        }
+    }
+}
+
+/// Full tree: Favorites and Recent sections on top of `base`.
+pub fn tree(root: &[Entry], recent: &[Recent]) -> Vec<Node> {
+    let base = base(root);
+    let mut out = Vec::new();
+
+    let mut favs = Vec::new();
+    starred(&base, &mut favs);
+    if !favs.is_empty() {
+        out.push(Node::folder("Favorites", "starred-symbolic", "tint-yellow", favs));
+    }
+    if !recent.is_empty() {
+        let items = recent
+            .iter()
+            .map(|r| {
+                let l = r.launch();
+                let (icon, tint) = kind_look(l.kind);
+                Node::item(&r.title, icon, tint, Ok(l))
+            })
+            .collect();
+        out.push(Node::folder("Recent", "document-open-recent-symbolic", "tint-magenta", items));
+    }
+    out.extend(base);
+    out
+}
+
+/// Every launchable row with its folder path as label, e.g. "Lab / board".
+pub fn flat(nodes: &[Node]) -> Vec<(String, Node)> {
+    fn walk(nodes: &[Node], prefix: &str, out: &mut Vec<(String, Node)>) {
+        for n in nodes {
+            let label = if prefix.is_empty() { n.name.clone() } else { format!("{prefix} / {}", n.name) };
+            match &n.kind {
+                NodeKind::Folder(kids) => walk(kids, &label, out),
+                NodeKind::Item(_) => out.push((label, n.clone())),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(nodes, "", &mut out);
+    out
+}
+
+/// Fuzzy subsequence score; None when `query` does not match `text`.
+/// Consecutive hits and word starts score higher, long texts slightly lower.
+pub fn fuzzy(query: &str, text: &str) -> Option<i32> {
+    let q: Vec<char> = query.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    let mut score = 0i32;
+    let mut ti = 0usize;
+    let mut prev: Option<usize> = None;
+    for qc in q {
+        while t.get(ti)? != &qc {
+            ti += 1;
+        }
+        score += 1;
+        if prev.is_some_and(|p| p + 1 == ti) {
+            score += 5;
+        }
+        if ti == 0 || !t[ti - 1].is_alphanumeric() {
+            score += 8;
+        }
+        prev = Some(ti);
+        ti += 1;
+    }
+    Some(score - (t.len() / 10) as i32)
 }
 
 pub fn filter(nodes: &[Node], query: &str) -> Vec<Node> {
@@ -134,6 +262,16 @@ pub fn quick(input: &str) -> Option<Quick> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fuzzy_ranks() {
+        assert!(fuzzy("tb", "T153 board").is_some());
+        assert!(fuzzy("xyz", "T153 board").is_none());
+        assert_eq!(fuzzy("", "anything").map(|s| s >= -1), Some(true));
+        let word = fuzzy("lab", "Lab / board").unwrap_or(i32::MIN);
+        let scattered = fuzzy("lab", "local shell abc").unwrap_or(i32::MIN);
+        assert!(word > scattered);
+    }
 
     #[test]
     fn quick_forms() {
