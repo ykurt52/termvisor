@@ -14,6 +14,8 @@ pub struct Settings {
     pub theme: String,
     pub font: String,
     pub scrollback: i64,
+    /// Reopen the last tabs on start.
+    pub restore_tabs: bool,
 }
 
 impl Default for Settings {
@@ -22,6 +24,7 @@ impl Default for Settings {
             theme: "Dark".into(),
             font: "Monospace 11".into(),
             scrollback: 10_000,
+            restore_tabs: false,
         }
     }
 }

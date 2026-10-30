@@ -40,7 +40,7 @@ impl State {
             themes: theme::load(&settings::dir().join("themes")),
             cfg: RefCell::new(Settings::load()),
             store: RefCell::new(Store::load()),
-            recent: RefCell::new(recent::load()),
+            recent: RefCell::new(recent::load(recent::RECENT)),
             listeners: RefCell::new(Vec::new()),
             terms: RefCell::new(Vec::new()),
             css,
@@ -89,7 +89,7 @@ impl State {
     /// Puts `l` on top of the recent list.
     pub fn remember(&self, l: &Launch) {
         recent::push(&mut self.recent.borrow_mut(), Recent::of(l));
-        if let Err(e) = recent::save(&self.recent.borrow()) {
+        if let Err(e) = recent::save(recent::RECENT, &self.recent.borrow()) {
             crate::warn(&format!("save recent: {e}"));
         }
         self.notify();
@@ -98,6 +98,13 @@ impl State {
     fn notify(&self) {
         for f in self.listeners.borrow().iter() {
             f();
+        }
+    }
+
+    pub fn set_restore(&self, on: bool) {
+        self.cfg.borrow_mut().restore_tabs = on;
+        if let Err(e) = self.cfg.borrow().save() {
+            crate::warn(&format!("save settings: {e}"));
         }
     }
 

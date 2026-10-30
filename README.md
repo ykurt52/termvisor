@@ -61,8 +61,9 @@ An SSH pane stays open when the session ends; press Enter to reconnect.
 
 | Path | Content |
 |---|---|
-| `~/.config/termvisor/settings.json` | Theme, font, scrollback |
+| `~/.config/termvisor/settings.json` | Theme, font, scrollback, restore tabs |
 | `~/.config/termvisor/sessions.toml` | Saved sessions, see [docs/sessions.md](docs/sessions.md) |
+| `~/.local/state/termvisor/recent.json`, `tabs.json` | Recent sessions, saved tabs |
 | `~/.config/termvisor/themes/*.json` | User themes, see [docs/themes.md](docs/themes.md) |
 
 ## License

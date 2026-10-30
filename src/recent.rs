@@ -1,4 +1,5 @@
-// Recently opened sessions, kept in $XDG_STATE_HOME/termvisor/recent.json.
+// Recently opened sessions and the saved tab list, kept under
+// $XDG_STATE_HOME/termvisor/.
 
 use std::fs;
 use std::io;
@@ -44,16 +45,19 @@ impl Recent {
     }
 }
 
-fn path() -> PathBuf {
+pub const RECENT: &str = "recent.json";
+pub const TABS: &str = "tabs.json";
+
+fn path(name: &str) -> PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| glib::home_dir().join(".local/state"));
-    base.join("termvisor").join("recent.json")
+    base.join("termvisor").join(name)
 }
 
-pub fn load() -> Vec<Recent> {
-    let path = path();
+pub fn load(name: &str) -> Vec<Recent> {
+    let path = path(name);
     match fs::read_to_string(&path) {
         Ok(t) => serde_json::from_str(&t).unwrap_or_else(|e| {
             crate::warn(&format!("{}: {e}", path.display()));
@@ -68,8 +72,8 @@ pub fn load() -> Vec<Recent> {
     }
 }
 
-pub fn save(list: &[Recent]) -> io::Result<()> {
-    let path = path();
+pub fn save(name: &str, list: &[Recent]) -> io::Result<()> {
+    let path = path(name);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }

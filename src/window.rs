@@ -13,9 +13,11 @@ use vte::prelude::*;
 use crate::dock;
 use crate::palette;
 use crate::pane;
+use crate::recent::{self, Recent};
 use crate::sessions::{self, Quick};
 use crate::sidebar::{OpenFn, Sidebar};
 use crate::state::State;
+use crate::store::{self, Entry, Folder};
 use crate::status::Status;
 use crate::term::{self, Launch};
 use crate::welcome;
@@ -77,6 +79,52 @@ impl Ui {
         let launch = self.active().and_then(|t| self.state.launch(&t));
         let theme = self.state.theme().map(|t| t.name.clone()).unwrap_or_default();
         self.status.show(launch.as_ref(), &theme);
+    }
+
+    /// Launch of the first pane in each tab; shells keep their current dir.
+    fn tabs(&self) -> Vec<Launch> {
+        (0..self.view.n_pages())
+            .filter_map(|i| {
+                let t = pane::find(&self.view.nth_page(i).child())?;
+                let mut l = self.state.launch(&t)?;
+                if l.kind == term::Kind::Shell {
+                    l.dir = term::cwd(&t).or(l.dir);
+                }
+                Some(l)
+            })
+            .collect()
+    }
+
+    fn export(&self) {
+        let dlg = gtk::FileDialog::new();
+        dlg.set_initial_name(Some("sessions.toml"));
+        let u = self.clone();
+        dlg.save(Some(&self.win), None::<&gio::Cancellable>, move |res| {
+            let Some(path) = res.ok().and_then(|f| f.path()) else { return };
+            match store::export(&u.state.store.borrow().root, &path) {
+                Ok(()) => u.toast(&format!("Exported to {}", path.display())),
+                Err(e) => u.toast(&format!("Export failed: {e}")),
+            }
+        });
+    }
+
+    /// Imports a TOML or JSON export into a new top-level folder.
+    fn import(&self) {
+        let u = self.clone();
+        gtk::FileDialog::new().open(Some(&self.win), None::<&gio::Cancellable>, move |res| {
+            let Some(path) = res.ok().and_then(|f| f.path()) else { return };
+            let entries = match store::import(&path) {
+                Ok(e) => e,
+                Err(e) => return u.toast(&format!("Import failed: {e}")),
+            };
+            let n: usize = entries.iter().map(|e| 1 + e.count()).sum();
+            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let folder = Entry::Folder(Folder { name: format!("Imported {stem}"), children: entries, ..Default::default() });
+            match u.state.edit_sessions(|s| s.insert(&[], None, folder)) {
+                Ok(()) => u.toast(&format!("Imported {n} items")),
+                Err(e) => u.toast(&e),
+            }
+        });
     }
 
     fn connect_quick(&self) {
@@ -243,6 +291,26 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     let u = ui.clone();
     win.connect_focus_widget_notify(move |_| u.refresh_status());
 
+    if primary {
+        let u = ui.clone();
+        win.connect_close_request(move |_| {
+            let list: Vec<Recent> = if u.state.cfg.borrow().restore_tabs {
+                u.tabs().iter().map(Recent::of).collect()
+            } else {
+                Vec::new()
+            };
+            if let Err(e) = recent::save(recent::TABS, &list) {
+                crate::warn(&format!("save tabs: {e}"));
+            }
+            glib::Propagation::Proceed
+        });
+        if state.cfg.borrow().restore_tabs {
+            for r in recent::load(recent::TABS) {
+                ui.open(&r.launch(), false);
+            }
+        }
+    }
+
     ui.refresh_status();
     win.present();
     view
@@ -255,9 +323,14 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     panes.append(Some("Close Pane"), Some("win.close-pane"));
 
     let view = gio::Menu::new();
-    view.append(Some("Find Session…"), Some("win.find-session"));
     view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
     view.append(Some("Toggle Bottom Panel"), Some("win.toggle-dock"));
+
+    let sess = gio::Menu::new();
+    sess.append(Some("Find Session…"), Some("win.find-session"));
+    sess.append(Some("Import Sessions…"), Some("win.import"));
+    sess.append(Some("Export Sessions…"), Some("win.export"));
+    sess.append(Some("Restore Tabs on Start"), Some("win.restore-tabs"));
 
     let themes = gio::Menu::new();
     for t in &state.themes {
@@ -267,6 +340,7 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     }
 
     let menu = gio::Menu::new();
+    menu.append_section(None, &sess);
     menu.append_section(None, &panes);
     menu.append_section(None, &view);
     menu.append_submenu(Some("Theme"), &themes);
@@ -303,6 +377,16 @@ fn add_actions(ui: &Ui) {
         let items = sessions::flat(&sessions::base(&u.state.store.borrow().root));
         palette::open(&u.win, items, u.pick.clone());
     });
+    action(ui, "import", None, |u, _| u.import());
+    action(ui, "export", None, |u, _| u.export());
+    let restore = gio::SimpleAction::new_stateful("restore-tabs", None, &ui.state.cfg.borrow().restore_tabs.to_variant());
+    let u = ui.clone();
+    restore.connect_activate(move |a, _| {
+        let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+        u.state.set_restore(on);
+        a.set_state(&on.to_variant());
+    });
+    ui.win.add_action(&restore);
     action(ui, "quick-connect", None, |u, _| {
         u.quick.grab_focus();
     });

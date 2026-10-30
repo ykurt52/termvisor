@@ -102,6 +102,23 @@ With the example above, "T153 board" runs:
 ssh -p 2222 -l root -J gw -- 192.168.1.50
 ```
 
+## Import and export
+
+Main menu → Export Sessions… writes all saved sessions to a file:
+`.json` gives JSON, any other name TOML (same layout as `sessions.toml`).
+The file is created with mode 0600.
+
+Main menu → Import Sessions… reads such a file and adds its content under a
+new top-level folder "Imported <file name>". Nothing existing is changed.
+
+## Restore tabs
+
+Main menu → Restore Tabs on Start (off by default). When on, closing the main
+window saves one entry per tab to `~/.local/state/termvisor/tabs.json`, and
+the next start reopens them. Only the first pane of a tab is saved; split
+layouts are not restored. Local shells reopen in their last directory when
+the shell reports it (OSC 7).
+
 ## Errors
 
 - A host, user or jump value starting with `-` is rejected.

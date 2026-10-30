@@ -406,6 +406,34 @@ pub fn dump(root: &[Entry]) -> Result<String, String> {
     toml::to_string_pretty(&file).map_err(|e| e.to_string())
 }
 
+fn is_json(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+}
+
+/// Writes `root` to `path`; `.json` gives JSON, anything else TOML.
+pub fn export(root: &[Entry], path: &Path) -> Result<(), String> {
+    let text = if is_json(path) {
+        let file = File { version: VERSION, node: root.to_vec() };
+        serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?
+    } else {
+        dump(root)?
+    };
+    write_private(path, &text).map_err(|e| e.to_string())
+}
+
+/// Reads entries from a TOML or JSON export.
+pub fn import(path: &Path) -> Result<Vec<Entry>, String> {
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    if !is_json(path) {
+        return parse(&text);
+    }
+    let file: File = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if file.version > VERSION {
+        return Err(format!("unsupported version {}", file.version));
+    }
+    Ok(file.node)
+}
+
 pub fn write_private(path: &Path, text: &str) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
     let mut f = OpenOptions::new()
@@ -569,6 +597,19 @@ dir = "/tmp"
         assert_eq!(path_parse("0/3/1"), Some(vec![0, 3, 1]));
         assert_eq!(path_parse(""), Some(vec![]));
         assert_eq!(path_parse("a"), None);
+    }
+
+    #[test]
+    fn export_import_both_formats() {
+        let dir = std::env::temp_dir().join(format!("tv-export-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("dir");
+        let root = parse(SAMPLE).expect("parse");
+        for name in ["s.toml", "s.json"] {
+            let p = dir.join(name);
+            export(&root, &p).expect("export");
+            assert_eq!(import(&p).expect("import"), root, "{name}");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
