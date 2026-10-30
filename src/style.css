@@ -1,0 +1,141 @@
+/* Layout styles. Colors come from the active theme (c_* = bright palette). */
+
+/* Rainbow strip under the header */
+.strip {
+  min-height: 3px;
+  background-image: linear-gradient(90deg, @c_blue, @c_cyan, @c_green, @c_yellow, @c_red, @c_magenta);
+}
+
+.logo {
+  margin: 0 4px;
+}
+
+/* Activity bar */
+.activitybar {
+  background-color: @headerbar_bg_color;
+  border-right: 1px solid @borders;
+  padding: 4px 0;
+}
+
+.activitybar button {
+  min-width: 40px;
+  min-height: 40px;
+  margin: 2px 4px;
+  border-radius: 8px;
+  opacity: 0.7;
+}
+
+.activitybar button:hover {
+  opacity: 1;
+}
+
+.activitybar button.active {
+  opacity: 1;
+}
+
+.act-sessions { color: @c_blue; }
+.act-files { color: @c_yellow; }
+.act-tunnels { color: @c_green; }
+.act-macros { color: @c_red; }
+.act-tools { color: @c_magenta; }
+
+.act-sessions.active { background-color: alpha(@c_blue, 0.18); box-shadow: inset 3px 0 0 @c_blue; }
+.act-files.active { background-color: alpha(@c_yellow, 0.18); box-shadow: inset 3px 0 0 @c_yellow; }
+.act-tunnels.active { background-color: alpha(@c_green, 0.18); box-shadow: inset 3px 0 0 @c_green; }
+.act-macros.active { background-color: alpha(@c_red, 0.18); box-shadow: inset 3px 0 0 @c_red; }
+.act-tools.active { background-color: alpha(@c_magenta, 0.18); box-shadow: inset 3px 0 0 @c_magenta; }
+
+/* Side panel */
+.sidebar {
+  background-color: @sidebar_bg_color;
+}
+
+.sidebar .title {
+  color: @accent_color;
+  font-size: 0.8em;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 8px 10px 4px 10px;
+}
+
+.sidebar listview {
+  background: transparent;
+}
+
+/* Tints for icons */
+.tint-blue { color: @c_blue; }
+.tint-green { color: @c_green; }
+.tint-yellow { color: @c_yellow; }
+.tint-red { color: @c_red; }
+.tint-magenta { color: @c_magenta; }
+.tint-cyan { color: @c_cyan; }
+
+/* Tabs */
+tabbar tab:selected {
+  box-shadow: inset 0 -2px 0 @accent_bg_color;
+}
+
+/* Bottom dock */
+.dock {
+  background-color: @sidebar_bg_color;
+  border-top: 1px solid @borders;
+}
+
+.dock stackswitcher button {
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 0.85em;
+}
+
+.dock stackswitcher button:checked {
+  color: @accent_color;
+  box-shadow: inset 0 -2px 0 @accent_bg_color;
+}
+
+/* Status bar, colored by session kind */
+.statusbar {
+  background-image: linear-gradient(90deg, @accent_bg_color, @c_magenta);
+  color: @accent_fg_color;
+  font-size: 0.85em;
+  padding: 0 8px;
+  min-height: 22px;
+}
+
+.statusbar.kind-shell {
+  background-image: linear-gradient(90deg, @c_blue, @c_cyan);
+  color: @window_bg_color;
+}
+
+.statusbar.kind-ssh {
+  background-image: linear-gradient(90deg, @c_green, @c_cyan);
+  color: @window_bg_color;
+}
+
+.statusbar label {
+  margin: 0 8px;
+  font-weight: bold;
+}
+
+/* Header */
+.quick {
+  min-width: 380px;
+}
+
+/* Start page */
+.welcome button.card {
+  padding: 8px 6px;
+  min-width: 92px;
+  font-size: 0.9em;
+}
+
+.bubble {
+  padding: 8px;
+  border-radius: 10px;
+}
+
+.bubble.tint-blue { background-color: alpha(@c_blue, 0.16); }
+.bubble.tint-green { background-color: alpha(@c_green, 0.16); }
+.bubble.tint-yellow { background-color: alpha(@c_yellow, 0.16); }
+.bubble.tint-red { background-color: alpha(@c_red, 0.16); }
+.bubble.tint-magenta { background-color: alpha(@c_magenta, 0.16); }
+.bubble.tint-cyan { background-color: alpha(@c_cyan, 0.16); }

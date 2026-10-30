@@ -1,0 +1,24 @@
+{
+    "name": "Dark",
+    "kind": "dark",
+    "ui": {
+        "bg": "#1e1e1e",
+        "fg": "#d4d4d4",
+        "panel": "#252526",
+        "header": "#2d2d2d",
+        "accent": "#3794ff",
+        "border": "#3c3c3c"
+    },
+    "term": {
+        "fg": "#d4d4d4",
+        "bg": "#1e1e1e",
+        "cursor": "#aeafad",
+        "selection": "#264f78",
+        "palette": [
+            "#000000", "#cd3131", "#0dbc79", "#e5e510",
+            "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+            "#666666", "#f14c4c", "#23d18b", "#f5f543",
+            "#3b8eea", "#d670d6", "#29b8db", "#ffffff"
+        ]
+    }
+}

@@ -1,0 +1,106 @@
+// Process-wide state shared by all windows.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use gtk::{gdk, glib, prelude::*};
+use vte::prelude::*;
+
+use crate::settings::{self, Settings};
+use crate::term::Launch;
+use crate::theme::{self, Theme};
+
+pub struct State {
+    pub themes: Vec<Theme>,
+    pub cfg: RefCell<Settings>,
+    terms: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Launch)>>,
+    css: gtk::CssProvider,
+}
+
+impl State {
+    pub fn new() -> Rc<Self> {
+        let css = gtk::CssProvider::new();
+        let base = gtk::CssProvider::new();
+        base.load_from_string(include_str!("style.css"));
+        if let Some(display) = gdk::Display::default() {
+            for p in [&base, &css] {
+                gtk::style_context_add_provider_for_display(
+                    &display,
+                    p,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                );
+            }
+        }
+        let state = Rc::new(Self {
+            themes: theme::load(&settings::dir().join("themes")),
+            cfg: RefCell::new(Settings::load()),
+            terms: RefCell::new(Vec::new()),
+            css,
+        });
+        state.apply();
+        state
+    }
+
+    /// Active theme, falling back to the first one.
+    pub fn theme(&self) -> Option<&Theme> {
+        let name = self.cfg.borrow().theme.clone();
+        self.themes
+            .iter()
+            .find(|t| t.name == name)
+            .or_else(|| self.themes.first())
+    }
+
+    pub fn set_theme(&self, name: &str) {
+        self.cfg.borrow_mut().theme = name.to_string();
+        if let Err(e) = self.cfg.borrow().save() {
+            crate::warn(&format!("save settings: {e}"));
+        }
+        self.apply();
+    }
+
+    /// Registers a terminal so theme changes reach it.
+    pub fn track(&self, term: &vte::Terminal, launch: &Launch) {
+        let mut terms = self.terms.borrow_mut();
+        terms.retain(|(w, _)| w.upgrade().is_some());
+        terms.push((term.downgrade(), launch.clone()));
+        if let Some(t) = self.theme() {
+            paint(term, t);
+        }
+    }
+
+    /// What `term` was launched with.
+    pub fn launch(&self, term: &vte::Terminal) -> Option<Launch> {
+        self.terms
+            .borrow()
+            .iter()
+            .find(|(w, _)| w.upgrade().as_ref() == Some(term))
+            .map(|(_, l)| l.clone())
+    }
+
+    fn apply(&self) {
+        let Some(t) = self.theme() else {
+            return;
+        };
+        let scheme = if t.dark {
+            adw::ColorScheme::ForceDark
+        } else {
+            adw::ColorScheme::ForceLight
+        };
+        adw::StyleManager::default().set_color_scheme(scheme);
+        self.css.load_from_string(&t.css);
+
+        let mut terms = self.terms.borrow_mut();
+        terms.retain(|(w, _)| w.upgrade().is_some());
+        for term in terms.iter().filter_map(|(w, _)| w.upgrade()) {
+            paint(&term, t);
+        }
+    }
+}
+
+fn paint(term: &vte::Terminal, t: &Theme) {
+    let c = &t.colors;
+    let palette: Vec<&gdk::RGBA> = c.palette.iter().collect();
+    term.set_colors(Some(&c.fg), Some(&c.bg), &palette);
+    term.set_color_cursor(Some(&c.cursor));
+    term.set_color_highlight(Some(&c.selection));
+}

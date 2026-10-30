@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=termvisor
+Comment=Multi-protocol terminal and remote access tool
+Exec=termvisor
+Icon=io.github.ykurt52.termvisor
+Terminal=false
+Categories=System;TerminalEmulator;Network;
+Keywords=terminal;ssh;serial;sftp;telnet;
+StartupWMClass=io.github.ykurt52.termvisor

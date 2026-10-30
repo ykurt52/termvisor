@@ -1,0 +1,319 @@
+// Main window layout and window actions.
+//
+// header: [new tab] [quick connect] [menu]
+// body:   activity bar | side panel | (welcome | tabs) over bottom dock
+// footer: status bar
+
+use std::rc::Rc;
+
+use adw::prelude::*;
+use gtk::{gio, glib};
+use vte::prelude::*;
+
+use crate::dock;
+use crate::pane;
+use crate::sessions::{self, Quick};
+use crate::sidebar::Sidebar;
+use crate::state::State;
+use crate::status::Status;
+use crate::term::{self, Launch};
+use crate::welcome;
+
+/// Keyboard shortcuts for window actions.
+pub const ACCELS: &[(&str, &[&str])] = &[
+    ("win.new-tab", &["<Ctrl><Shift>t"]),
+    ("win.close-pane", &["<Ctrl><Shift>w"]),
+    ("win.split-right", &["<Ctrl><Shift>e"]),
+    ("win.split-down", &["<Ctrl><Shift>o"]),
+    ("win.copy", &["<Ctrl><Shift>c"]),
+    ("win.paste", &["<Ctrl><Shift>v"]),
+    ("win.zoom-in", &["<Ctrl>plus", "<Ctrl>equal"]),
+    ("win.zoom-out", &["<Ctrl>minus"]),
+    ("win.zoom-reset", &["<Ctrl>0"]),
+    ("win.toggle-sidebar", &["<Ctrl><Shift>b"]),
+    ("win.toggle-dock", &["<Ctrl><Shift>j"]),
+    ("win.quick-connect", &["<Ctrl><Shift>l"]),
+];
+
+/// Widgets the actions need.
+#[derive(Clone)]
+struct Ui {
+    win: adw::ApplicationWindow,
+    view: adw::TabView,
+    sidebar: Sidebar,
+    dock: gtk::Box,
+    status: Status,
+    quick: gtk::Entry,
+    toasts: adw::ToastOverlay,
+    state: Rc<State>,
+}
+
+impl Ui {
+    fn toast(&self, msg: &str) {
+        self.toasts.add_toast(adw::Toast::new(msg));
+    }
+
+    /// Focused terminal, else the first one in the selected tab.
+    fn active(&self) -> Option<vte::Terminal> {
+        let focused = gtk::prelude::GtkWindowExt::focus(&self.win)
+            .and_then(|f| f.ancestor(vte::Terminal::static_type()))
+            .and_then(|w| w.downcast::<vte::Terminal>().ok());
+        focused.or_else(|| self.view.selected_page().and_then(|p| pane::find(&p.child())))
+    }
+
+    fn open(&self, launch: &Launch) {
+        open_tab(&self.view, &self.state, launch);
+    }
+
+    fn refresh_status(&self) {
+        let launch = self.active().and_then(|t| self.state.launch(&t));
+        let theme = self.state.theme().map(|t| t.name.clone()).unwrap_or_default();
+        self.status.show(launch.as_ref(), &theme);
+    }
+
+    fn connect_quick(&self) {
+        let text = self.quick.text();
+        match sessions::quick(&text) {
+            Some(Quick::Ssh { args, target }) => {
+                self.open(&Launch::ssh(args, &target));
+                self.quick.set_text("");
+            }
+            Some(Quick::Serial(_)) => self.toast("Serial ports arrive in milestone 4"),
+            None => self.toast("Use user@host[:port], ssh <args> or /dev/ttyX"),
+        }
+    }
+}
+
+fn open_tab(view: &adw::TabView, state: &Rc<State>, launch: &Launch) {
+    let t = pane::open(state, launch);
+    let root = pane::root();
+    root.append(&term::leaf(&t));
+    let page = view.append(&root);
+    page.set_title(&launch.title);
+    page.set_icon(Some(&gio::ThemedIcon::new(launch.kind.icon())));
+    view.set_selected_page(&page);
+    t.grab_focus();
+}
+
+/// Builds and shows a window. Secondary windows (tab drag-out) close when empty.
+pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::TabView {
+    let view = adw::TabView::new();
+    let bar = adw::TabBar::new();
+    bar.set_view(Some(&view));
+    bar.set_autohide(false);
+
+    let tabs = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    tabs.append(&bar);
+    tabs.append(&view);
+    view.set_vexpand(true);
+
+    let main = gtk::Stack::new();
+    main.set_vexpand(true);
+    main.add_named(&welcome::build(), Some("welcome"));
+    main.add_named(&tabs, Some("tabs"));
+    main.set_visible_child_name("welcome");
+
+    let dock = dock::build();
+    let vsplit = gtk::Paned::new(gtk::Orientation::Vertical);
+    vsplit.set_start_child(Some(&main));
+    vsplit.set_end_child(Some(&dock));
+    vsplit.set_resize_end_child(false);
+    vsplit.set_shrink_end_child(false);
+    vsplit.set_hexpand(true);
+
+    let quick = gtk::Entry::new();
+    quick.add_css_class("quick");
+    quick.set_placeholder_text(Some("Quick connect: user@host:port, ssh <args>, /dev/ttyUSB0"));
+    quick.set_primary_icon_name(Some("network-server-symbolic"));
+
+    let header = adw::HeaderBar::new();
+    let logo = gtk::Image::from_icon_name(crate::APP_ID);
+    logo.set_pixel_size(24);
+    logo.add_css_class("logo");
+    header.pack_start(&logo);
+    let add = gtk::Button::from_icon_name("tab-new-symbolic");
+    add.set_action_name(Some("win.new-tab"));
+    add.set_tooltip_text(Some("New Tab (Ctrl+Shift+T)"));
+    header.pack_start(&add);
+    header.set_title_widget(Some(&quick));
+    let menu = gtk::MenuButton::new();
+    menu.set_icon_name("open-menu-symbolic");
+    menu.set_menu_model(Some(&menu_model(state)));
+    header.pack_end(&menu);
+
+    let status = Status::new();
+    let toasts = adw::ToastOverlay::new();
+    let body = adw::ToolbarView::new();
+    body.add_top_bar(&header);
+    let strip = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    strip.add_css_class("strip");
+    body.add_top_bar(&strip);
+    body.set_content(Some(&toasts));
+
+    let win = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("termvisor")
+        .default_width(1200)
+        .default_height(760)
+        .content(&body)
+        .build();
+
+    let weak = view.downgrade();
+    let st = state.clone();
+    let open_cb: Rc<dyn Fn(Launch)> = Rc::new(move |launch: Launch| {
+        if let Some(v) = weak.upgrade() {
+            open_tab(&v, &st, &launch);
+        }
+    });
+    let sidebar = Sidebar::new(open_cb);
+
+    let hsplit = gtk::Paned::new(gtk::Orientation::Horizontal);
+    hsplit.set_start_child(Some(&sidebar.panel));
+    hsplit.set_end_child(Some(&vsplit));
+    hsplit.set_resize_start_child(false);
+    hsplit.set_shrink_start_child(false);
+
+    let center = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    center.set_vexpand(true);
+    center.append(&sidebar.bar);
+    center.append(&hsplit);
+
+    let outer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    outer.append(&center);
+    outer.append(&status.bar);
+    toasts.set_child(Some(&outer));
+
+    let ui = Ui {
+        win: win.clone(),
+        view: view.clone(),
+        sidebar,
+        dock,
+        status,
+        quick: quick.clone(),
+        toasts,
+        state: state.clone(),
+    };
+    add_actions(&ui);
+
+    let u = ui.clone();
+    quick.connect_activate(move |_| u.connect_quick());
+
+    let weak = win.downgrade();
+    view.connect_n_pages_notify(move |v| {
+        if v.n_pages() > 0 {
+            main.set_visible_child_name("tabs");
+            return;
+        }
+        if primary {
+            main.set_visible_child_name("welcome");
+        } else if let Some(w) = weak.upgrade() {
+            w.close();
+        }
+    });
+
+    let app_ref = app.clone();
+    let st = state.clone();
+    view.connect_create_window(move |_| Some(build(&app_ref, &st, false)));
+
+    let u = ui.clone();
+    view.connect_selected_page_notify(move |v| {
+        if let Some(t) = v.selected_page().and_then(|p| pane::find(&p.child())) {
+            t.grab_focus();
+        }
+        u.refresh_status();
+    });
+    let u = ui.clone();
+    win.connect_focus_widget_notify(move |_| u.refresh_status());
+
+    ui.refresh_status();
+    win.present();
+    view
+}
+
+fn menu_model(state: &Rc<State>) -> gio::Menu {
+    let panes = gio::Menu::new();
+    panes.append(Some("Split Right"), Some("win.split-right"));
+    panes.append(Some("Split Down"), Some("win.split-down"));
+    panes.append(Some("Close Pane"), Some("win.close-pane"));
+
+    let view = gio::Menu::new();
+    view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
+    view.append(Some("Toggle Bottom Panel"), Some("win.toggle-dock"));
+
+    let themes = gio::Menu::new();
+    for t in &state.themes {
+        let item = gio::MenuItem::new(Some(&t.name), None);
+        item.set_action_and_target_value(Some("win.theme"), Some(&t.name.to_variant()));
+        themes.append_item(&item);
+    }
+
+    let menu = gio::Menu::new();
+    menu.append_section(None, &panes);
+    menu.append_section(None, &view);
+    menu.append_submenu(Some("Theme"), &themes);
+    menu
+}
+
+fn action<F>(ui: &Ui, name: &str, param: Option<&glib::VariantTy>, f: F)
+where
+    F: Fn(&Ui, Option<&glib::Variant>) + 'static,
+{
+    let a = gio::SimpleAction::new(name, param);
+    let u = ui.clone();
+    a.connect_activate(move |_, p| f(&u, p));
+    ui.win.add_action(&a);
+}
+
+fn on_term<F>(ui: &Ui, name: &str, f: F)
+where
+    F: Fn(&Ui, &vte::Terminal) + 'static,
+{
+    action(ui, name, None, move |u, _| {
+        if let Some(t) = u.active() {
+            f(u, &t);
+        }
+    });
+}
+
+fn add_actions(ui: &Ui) {
+    action(ui, "new-tab", None, |u, _| {
+        let dir = u.active().and_then(|t| term::cwd(&t));
+        u.open(&Launch::shell(dir));
+    });
+    action(ui, "quick-connect", None, |u, _| {
+        u.quick.grab_focus();
+    });
+    action(ui, "soon", Some(glib::VariantTy::STRING), |u, p| {
+        if let Some(msg) = p.and_then(|v| v.get::<String>()) {
+            u.toast(&msg);
+        }
+    });
+    action(ui, "toggle-sidebar", None, |u, _| u.sidebar.toggle());
+    action(ui, "toggle-dock", None, |u, _| u.dock.set_visible(!u.dock.is_visible()));
+
+    on_term(ui, "split-right", |u, t| {
+        pane::split(&u.state, t, gtk::Orientation::Horizontal);
+    });
+    on_term(ui, "split-down", |u, t| {
+        pane::split(&u.state, t, gtk::Orientation::Vertical);
+    });
+    on_term(ui, "close-pane", |_, t| pane::close(t));
+    on_term(ui, "copy", |_, t| t.copy_clipboard_format(vte::Format::Text));
+    on_term(ui, "paste", |_, t| t.paste_clipboard());
+    on_term(ui, "zoom-in", |_, t| t.set_font_scale((t.font_scale() * 1.1).min(4.0)));
+    on_term(ui, "zoom-out", |_, t| t.set_font_scale((t.font_scale() / 1.1).max(0.25)));
+    on_term(ui, "zoom-reset", |_, t| t.set_font_scale(1.0));
+
+    let current = ui.state.theme().map(|t| t.name.clone()).unwrap_or_default();
+    let theme = gio::SimpleAction::new_stateful("theme", Some(glib::VariantTy::STRING), &current.to_variant());
+    let u = ui.clone();
+    theme.connect_activate(move |a, p| {
+        let Some(name) = p.and_then(|v| v.get::<String>()) else {
+            return;
+        };
+        u.state.set_theme(&name);
+        a.set_state(&name.to_variant());
+        u.refresh_status();
+    });
+    ui.win.add_action(&theme);
+}
