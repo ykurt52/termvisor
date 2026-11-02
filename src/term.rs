@@ -125,7 +125,7 @@ pub fn spawn(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
 }
 
 /// Socket dir for ssh connection sharing, created 0700. None if unusable.
-fn mux_dir() -> Option<PathBuf> {
+pub fn mux_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join("termvisor");
     // Unix socket paths are limited to ~108 bytes; %C expands to 40 chars.
     if dir.as_os_str().len() > 60 {

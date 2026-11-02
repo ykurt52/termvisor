@@ -146,6 +146,30 @@ fn retry(v: &Rc<View>) {
     v.retry.replace(Some(id));
 }
 
+/// Closes every port owned by a pane in this process. Panes stay open and
+/// do not auto-reconnect; the reconnect button reopens them. Returns the
+/// number of ports closed.
+pub fn release_all() -> usize {
+    let owners: Vec<Rc<View>> = PORTS.with(|p| p.borrow().values().filter_map(|x| x.owner.upgrade()).collect());
+    let mut n = 0;
+    for v in owners {
+        if let Some(id) = v.retry.take() {
+            id.remove();
+        }
+        if v.conn.take().is_some() {
+            n += 1;
+            v.set_up(false);
+            v.note("33", "released; press the reconnect button to reopen");
+        }
+    }
+    n
+}
+
+/// Number of ports open in this process.
+pub fn open_count() -> usize {
+    PORTS.with(|p| p.borrow().values().filter_map(|x| x.owner.upgrade()).filter(|v| v.conn.borrow().is_some()).count())
+}
+
 fn toggle(label: &str, tip: &str, on: bool) -> gtk::ToggleButton {
     let b = gtk::ToggleButton::with_label(label);
     b.set_tooltip_text(Some(tip));

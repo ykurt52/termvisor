@@ -49,6 +49,7 @@ cargo build --release
 | Zoom in / out / reset | Ctrl++ / Ctrl+- / Ctrl+0 |
 | Quick connect | Ctrl+Shift+L |
 | Find session | Ctrl+Shift+K |
+| Release all connections | Ctrl+Shift+R |
 | Toggle sidebar | Ctrl+Shift+B |
 | Toggle bottom panel | Ctrl+Shift+J |
 | Next / previous tab | Ctrl+PgDn / Ctrl+PgUp |
@@ -59,6 +60,7 @@ Drag a tab out of the tab bar to open it in a new window.
 An SSH pane stays open when the session ends; press Enter to reconnect.
 SSH prompts, connection sharing and the keyring: [docs/ssh.md](docs/ssh.md).
 Serial ports, locking, mirror and reconnect: [docs/serial.md](docs/serial.md).
+Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files
 

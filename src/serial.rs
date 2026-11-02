@@ -218,17 +218,17 @@ pub fn holders(device: &Path) -> Vec<(u32, String)> {
     out
 }
 
-fn comm(pid: u32) -> String {
+pub fn comm(pid: u32) -> String {
     fs::read_to_string(format!("/proc/{pid}/comm"))
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "?".into())
 }
 
-fn alive(pid: u32) -> bool {
+pub fn alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
 
-const LOCK_DIR: &str = "/run/lock";
+pub const LOCK_DIR: &str = "/run/lock";
 
 fn lock_file(dir: &Path, device: &str) -> PathBuf {
     let base = device.rsplit('/').next().unwrap_or(device);
@@ -248,7 +248,7 @@ fn lock(dir: &Path, device: &str) -> Result<Option<PathBuf>, String> {
     let me = std::process::id();
     match lock_owner(&path) {
         Some(pid) if pid != me => {
-            return Err(format!("{device} is locked by {} (PID {pid})", comm(pid)));
+            return Err(format!("{device} is locked by {} (PID {pid}){}", comm(pid), hint(&comm(pid))));
         }
         Some(_) => return Ok(Some(path)),
         None => {
@@ -270,6 +270,15 @@ fn lock(dir: &Path, device: &str) -> Result<Option<PathBuf>, String> {
 fn unlock(path: &Path) {
     if lock_owner(path) == Some(std::process::id()) {
         let _ = fs::remove_file(path);
+    }
+}
+
+/// Extra advice when the holder is another termvisor.
+fn hint(name: &str) -> &'static str {
+    if name == "termvisor" {
+        "; free it with Release All (Ctrl+Shift+R)"
+    } else {
+        ""
     }
 }
 
@@ -300,7 +309,8 @@ fn explain(cfg: &SerialCfg, e: &serialport::Error) -> String {
                 format!("{dev}: {e}")
             } else {
                 let list: Vec<String> = who.iter().map(|(p, n)| format!("{n} (PID {p})")).collect();
-                format!("{dev} is in use by {}", list.join(", "))
+                let tip = who.iter().map(|(_, n)| hint(n)).find(|h| !h.is_empty()).unwrap_or_default();
+                format!("{dev} is in use by {}{tip}", list.join(", "))
             }
         }
         _ => format!("{dev}: {e}"),

@@ -18,6 +18,8 @@ pub struct State {
     pub store: RefCell<Store>,
     pub recent: RefCell<Vec<Recent>>,
     listeners: RefCell<Vec<Box<dyn Fn()>>>,
+    /// One-time message for the first window (e.g. startup cleanup).
+    pub notice: RefCell<Option<String>>,
     terms: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Launch)>>,
     css: gtk::CssProvider,
 }
@@ -42,6 +44,7 @@ impl State {
             store: RefCell::new(Store::load()),
             recent: RefCell::new(recent::load(recent::RECENT)),
             listeners: RefCell::new(Vec::new()),
+            notice: RefCell::new(None),
             terms: RefCell::new(Vec::new()),
             css,
         });

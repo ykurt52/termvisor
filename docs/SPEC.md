@@ -51,21 +51,22 @@ Code must not use APIs newer than these.
 
 ## 4. Resource release and recovery
 
-- All child processes run in a dedicated process group with `PR_SET_PDEATHSIG`.
-- PID file per instance under `$XDG_RUNTIME_DIR/termvisor/`.
-- Startup scan for leftovers of a previous instance:
-  - hung previous process holding ports,
-  - orphan children (ssh master, mosh, transfer helpers),
-  - stale lock files (`/var/lock/LCK..*`) pointing at dead PIDs,
-  - stale ControlMaster sockets.
-  Found items are listed in one dialog with a "Release" action.
-- "Release All" action (menu + Ctrl+Shift+R): closes all connections,
-  kills children, removes our locks and sockets.
-- Port picker shows the owner of a busy port. Our processes can be released;
-  foreign processes are only reported, never killed silently.
+Details in docs/recovery.md.
+
+- A crash needs no child reaping: ptys hang up (SIGHUP to shells and ssh)
+  and the kernel closes serial fds. `PR_SET_PDEATHSIG` is not used: it
+  tracks the forking thread, not the process.
+- Startup removes stale UUCP locks (dead PID) and stale ControlMaster
+  sockets, and reports it in a toast.
+- "Release All" (menu + Ctrl+Shift+R), after confirmation: closes this
+  process's serial ports (panes stay), closes shared SSH connections,
+  removes stale locks/sockets, optionally stops other instances
+  (SIGTERM, then SIGKILL).
+- Port picker / open errors name the process holding a busy port.
+  Foreign processes are only reported, never killed.
 - CLI: `termvisor --release-all` does the same without the GUI.
-- Watchdog: if the GUI thread stalls for more than 5 s, offer
-  "release connections and quit".
+- Watchdog: if the GUI thread stalls for more than 5 s, a helper process
+  offers "Wait" or "Stop and Release".
 
 ## 5. Session management
 
@@ -243,7 +244,7 @@ Arch containers, release packages on tag.
 2. Session tree and storage, quick connect.
 3. SSH with ControlMaster, host key handling, keyring.
 4. Serial: port picker, lock, mirror, hex view, line endings, reconnect.
-5. Recovery: process group, startup scan, Release All, `--release-all`.
+5. Recovery: startup cleanup, Release All, `--release-all`, watchdog.
 6. Telnet, Raw TCP, Mosh.
 7. File browser and transfer queue (SFTP, FTP/FTPS).
 8. XMODEM / YMODEM / ZMODEM.

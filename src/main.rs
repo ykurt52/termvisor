@@ -7,6 +7,7 @@ mod keyring;
 mod palette;
 mod pane;
 mod recent;
+mod recover;
 mod sessions;
 mod serial;
 mod serialpane;
@@ -17,6 +18,7 @@ mod status;
 mod store;
 mod term;
 mod theme;
+mod watchdog;
 mod welcome;
 mod window;
 
@@ -40,6 +42,16 @@ fn main() -> glib::ExitCode {
     if std::env::var_os(askpass::ENV_MODE).is_some() && args.len() == 2 {
         return askpass::run(&args[1]);
     }
+    match args.get(1).map(String::as_str) {
+        Some("--release-all") => return glib::ExitCode::from(u8::try_from(recover::cli()).unwrap_or(1)),
+        Some(watchdog::FLAG) => {
+            return match args.get(2).and_then(|p| p.parse::<u32>().ok()) {
+                Some(pid) => watchdog::helper(pid),
+                None => glib::ExitCode::FAILURE,
+            };
+        }
+        _ => {}
+    }
 
     if let Err(e) = gio::resources_register_include!("termvisor.gresource") {
         warn(&format!("resources: {e}"));
@@ -58,11 +70,19 @@ fn main() -> glib::ExitCode {
         for (action, keys) in window::ACCELS {
             app.set_accels_for_action(action, keys);
         }
+        watchdog::start();
     });
 
     let state: Rc<OnceCell<Rc<State>>> = Rc::new(OnceCell::new());
     app.connect_activate(move |app| {
-        let st = state.get_or_init(State::new);
+        let st = state.get_or_init(|| {
+            let st = State::new();
+            let r = recover::tidy();
+            if !r.is_empty() {
+                st.notice.replace(Some(format!("Startup cleanup: {}", r.summary())));
+            }
+            st
+        });
         window::build(app, st, true);
     });
 

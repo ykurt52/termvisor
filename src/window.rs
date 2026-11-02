@@ -14,6 +14,8 @@ use crate::dock;
 use crate::editor;
 use crate::palette;
 use crate::pane;
+use crate::recover;
+use crate::serialpane;
 use crate::recent::{self, Recent};
 use crate::serial::SerialCfg;
 use crate::sessions::{self, Quick};
@@ -39,6 +41,7 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.toggle-dock", &["<Ctrl><Shift>j"]),
     ("win.quick-connect", &["<Ctrl><Shift>l"]),
     ("win.find-session", &["<Ctrl><Shift>k"]),
+    ("win.release-all", &["<Ctrl><Shift>r"]),
 ];
 
 /// Widgets the actions need.
@@ -127,6 +130,60 @@ impl Ui {
                 Err(e) => u.toast(&e),
             }
         });
+    }
+
+    /// Confirms, then releases serial ports, shared SSH connections and
+    /// optionally other instances. The slow part runs off the GUI thread.
+    fn release(&self) {
+        let ports = serialpane::open_count();
+        let masters = recover::masters();
+        let others = recover::instances();
+        let mut lines = vec![
+            format!("• close {ports} serial port(s) in this window; panes stay open"),
+            format!("• close {masters} shared SSH connection(s); SSH panes can reconnect with Enter"),
+            "• remove stale lock files and sockets".to_string(),
+        ];
+        if others.is_empty() {
+            lines.push("• no other termvisor instance is running".into());
+        }
+        let d = adw::AlertDialog::new(Some("Release All Connections?"), Some(&lines.join("\n")));
+        let stop_others = gtk::CheckButton::new();
+        if !others.is_empty() {
+            let desc: Vec<String> = others
+                .iter()
+                .map(|i| {
+                    if i.ports.is_empty() {
+                        format!("PID {}", i.pid)
+                    } else {
+                        format!("PID {} ({})", i.pid, i.ports.join(", "))
+                    }
+                })
+                .collect();
+            stop_others.set_label(Some(&format!("Also stop other termvisor instances: {}", desc.join(", "))));
+            stop_others.set_active(others.iter().any(|i| !i.ports.is_empty()));
+            d.set_extra_child(Some(&stop_others));
+        }
+        d.add_responses(&[("cancel", "Cancel"), ("release", "Release")]);
+        d.set_response_appearance("release", adw::ResponseAppearance::Destructive);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        let u = self.clone();
+        d.connect_response(None, move |_, resp| {
+            if resp != "release" {
+                return;
+            }
+            let n = serialpane::release_all();
+            let kill = stop_others.is_active();
+            let u = u.clone();
+            glib::spawn_future_local(async move {
+                let msg = match gio::spawn_blocking(move || recover::release(kill)).await {
+                    Ok(r) => format!("{n} serial port(s) released; {}", r.summary()),
+                    Err(_) => "Release failed".into(),
+                };
+                u.toast(&msg);
+            });
+        });
+        d.present(Some(&self.win));
     }
 
     fn connect_quick(&self) {
@@ -320,6 +377,9 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         }
     }
 
+    if let Some(msg) = state.notice.take() {
+        ui.toast(&msg);
+    }
     ui.refresh_status();
     win.present();
     view
@@ -353,6 +413,9 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     menu.append_section(None, &panes);
     menu.append_section(None, &view);
     menu.append_submenu(Some("Theme"), &themes);
+    let rescue = gio::Menu::new();
+    rescue.append(Some("Release All Connections…"), Some("win.release-all"));
+    menu.append_section(None, &rescue);
     menu
 }
 
@@ -392,6 +455,7 @@ fn add_actions(ui: &Ui) {
         let init = Entry::Serial(store::Serial { name, cfg, ..Default::default() });
         editor::open(&u.win, &u.state, editor::Mode::New(Vec::new()), init);
     });
+    action(ui, "release-all", None, |u, _| u.release());
     action(ui, "import", None, |u, _| u.import());
     action(ui, "export", None, |u, _| u.export());
     let restore = gio::SimpleAction::new_stateful("restore-tabs", None, &ui.state.cfg.borrow().restore_tabs.to_variant());
