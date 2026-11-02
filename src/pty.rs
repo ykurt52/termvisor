@@ -198,8 +198,16 @@ mod imp {
             self.parent_constructed();
             // Typed text, pastes, button sends and terminal replies.
             self.obj().connect_commit(|t, text, _| {
-                if let Some(c) = t.imp().child.borrow().as_ref() {
-                    c.write(text.as_bytes());
+                let sent = match t.imp().child.borrow().as_ref() {
+                    Some(c) => {
+                        c.write(text.as_bytes());
+                        true
+                    }
+                    None => false,
+                };
+                // Stream panes have no child here and copy input themselves.
+                if sent {
+                    crate::multi::typed(t.upcast_ref(), text);
                 }
             });
         }
@@ -213,6 +221,19 @@ mod imp {
     }
 
     impl TerminalImpl for Term {}
+}
+
+/// Writes `data` to the program of terminal `t` as input. False when `t`
+/// runs no program here.
+pub fn send(t: &vte::Terminal, data: &[u8]) -> bool {
+    let Some(t) = t.downcast_ref::<Term>() else { return false };
+    match t.imp().child.borrow().as_ref() {
+        Some(c) => {
+            c.write(data);
+            true
+        }
+        None => false,
+    }
 }
 
 glib::wrapper! {

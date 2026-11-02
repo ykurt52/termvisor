@@ -227,3 +227,22 @@ tabbar tab:selected {
 .cmdpanel flowboxchild {
   padding: 0;
 }
+
+/* Multi-exec */
+.multibar {
+  background-color: alpha(@c_red, 0.14);
+  border-bottom: 1px solid alpha(@c_red, 0.6);
+  padding: 3px 8px;
+}
+
+.multi-frame {
+  border: 2px solid @c_red;
+}
+
+.multi-check {
+  margin: 4px 14px 0 0;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background-color: alpha(@window_bg_color, 0.85);
+  font-size: 0.85em;
+}

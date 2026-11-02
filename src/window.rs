@@ -11,6 +11,7 @@ use gtk::{gio, glib};
 use vte::prelude::*;
 
 use crate::dock;
+use crate::multi;
 use crate::editor;
 use crate::palette;
 use crate::pane;
@@ -47,6 +48,7 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.quick-connect", &["<Ctrl><Shift>l"]),
     ("win.find-session", &["<Ctrl><Shift>k"]),
     ("win.release-all", &["<Ctrl><Shift>r"]),
+    ("win.multi-exec", &["<Ctrl><Shift>m"]),
 ];
 
 /// Widgets the actions need.
@@ -155,6 +157,7 @@ impl Ui {
         let mut lines = vec![
             format!("• close {ports} serial port(s) in this window; panes stay open"),
             format!("• close {masters} shared SSH connection(s); SSH panes can reconnect with Enter"),
+            format!("• stop {} SSH tunnel(s)", self.state.tunnels.active()),
             "• remove stale lock files and sockets".to_string(),
         ];
         if others.is_empty() {
@@ -187,6 +190,7 @@ impl Ui {
                 return;
             }
             let n = streampane::release_all();
+            u.state.tunnels.stop_all();
             let kill = stop_others.is_active();
             let u = u.clone();
             glib::spawn_future_local(async move {
@@ -304,6 +308,57 @@ fn focused(win: &adw::ApplicationWindow) -> Option<vte::Terminal> {
         .and_then(|w| w.downcast::<vte::Terminal>().ok())
 }
 
+/// Bar shown while multi-exec is on: selection count and a line to send.
+fn multi_bar() -> gtk::Box {
+    let title = gtk::Label::new(Some("● Multi-exec"));
+    title.add_css_class("heading");
+    title.add_css_class("tint-red");
+    let count = gtk::Label::new(None);
+    count.add_css_class("dim-label");
+    let entry = gtk::Entry::new();
+    entry.set_hexpand(true);
+    entry.set_placeholder_text(Some("Send a line to the selected panes (Enter). Typing in a selected pane goes to all of them."));
+    entry.update_property(&[gtk::accessible::Property::Label("Send to selected panes")]);
+    let all = gtk::Button::with_label("All");
+    all.set_tooltip_text(Some("Select every pane"));
+    let none = gtk::Button::with_label("None");
+    let exit = gtk::Button::from_icon_name("window-close-symbolic");
+    exit.add_css_class("flat");
+    exit.set_tooltip_text(Some("Leave multi-exec (Ctrl+Shift+M)"));
+    exit.set_action_name(Some("win.multi-exec"));
+    all.connect_clicked(|_| multi::select_all(true));
+    none.connect_clicked(|_| multi::select_all(false));
+    let fire = |e: &gtk::Entry| {
+        let line = format!("{}\r", e.text());
+        for t in multi::targets() {
+            multi::type_into(&t, &line);
+        }
+        e.set_text("");
+    };
+    entry.connect_activate(fire);
+    let send = gtk::Button::with_label("Send");
+    let e = entry.clone();
+    send.connect_clicked(move |_| fire(&e));
+
+    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    bar.add_css_class("multibar");
+    for w in [title.upcast_ref::<gtk::Widget>(), count.upcast_ref(), entry.upcast_ref(), send.upcast_ref(), all.upcast_ref(), none.upcast_ref(), exit.upcast_ref()] {
+        bar.append(w);
+    }
+    let sync = {
+        let (b, c) = (bar.downgrade(), count.downgrade());
+        move || {
+            let (Some(b), Some(c)) = (b.upgrade(), c.upgrade()) else { return };
+            b.set_visible(multi::on());
+            let n = multi::targets().len();
+            c.set_text(&format!("{n} pane{} selected", if n == 1 { "" } else { "s" }));
+        }
+    };
+    sync();
+    multi::on_change(sync);
+    bar
+}
+
 /// Focused terminal, else the last focused one in this window (the focus
 /// may be on a dock control), else the first one in the selected tab.
 fn active(win: &adw::ApplicationWindow, view: &adw::TabView, last: &glib::WeakRef<vte::Terminal>) -> Option<vte::Terminal> {
@@ -339,6 +394,7 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     bar.set_autohide(false);
 
     let tabs = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    tabs.append(&multi_bar());
     tabs.append(&bar);
     tabs.append(&view);
     view.set_vexpand(true);
@@ -372,6 +428,12 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     add.set_action_name(Some("win.new-tab"));
     add.set_tooltip_text(Some("New Tab (Ctrl+Shift+T)"));
     header.pack_start(&add);
+    let multi_btn = gtk::ToggleButton::new();
+    multi_btn.set_icon_name("view-grid-symbolic");
+    multi_btn.set_tooltip_text(Some("Multi-exec: type into several panes at once (Ctrl+Shift+M)"));
+    multi_btn.update_property(&[gtk::accessible::Property::Label("Multi-exec")]);
+    multi_btn.set_action_name(Some("win.multi-exec"));
+    header.pack_start(&multi_btn);
     header.set_title_widget(Some(&quick));
     let menu = gtk::MenuButton::new();
     menu.set_icon_name("open-menu-symbolic");
@@ -448,6 +510,9 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     };
     add_actions(&ui);
     win.add_controller(dock.commands.keys());
+    win.add_controller(ui.sidebar.macros.keys());
+    let (w, v, l) = (win.downgrade(), view.downgrade(), last.clone());
+    ui.sidebar.macros.set_target(move || active(&w.upgrade()?, &v.upgrade()?, &l));
     if state.cfg.borrow().dock_right {
         ui.place_dock(true);
     }
@@ -549,6 +614,7 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
     view.append(Some("Toggle Bottom Panel"), Some("win.toggle-dock"));
     view.append(Some("Panel on Right"), Some("win.dock-right"));
+    view.append(Some("Multi-Exec"), Some("win.multi-exec"));
 
     let sess = gio::Menu::new();
     sess.append(Some("Find Session…"), Some("win.find-session"));
@@ -640,6 +706,25 @@ fn add_actions(ui: &Ui) {
             u.sidebar.show("files");
         }
     });
+    let me = gio::SimpleAction::new_stateful("multi-exec", None, &multi::on().to_variant());
+    let u = ui.clone();
+    me.connect_activate(move |_, _| {
+        let on = !multi::on();
+        // Starting with nothing selected: take the current pane.
+        if on && multi::targets().is_empty() {
+            if let Some(t) = u.active() {
+                multi::select(&t, true);
+            }
+        }
+        multi::set_on(on);
+    });
+    let w = me.downgrade();
+    multi::on_change(move || {
+        if let Some(a) = w.upgrade() {
+            a.set_state(&multi::on().to_variant());
+        }
+    });
+    ui.win.add_action(&me);
     action(ui, "release-all", None, |u, _| u.release());
     action(ui, "import", None, |u, _| u.import());
     action(ui, "export", None, |u, _| u.export());

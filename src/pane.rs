@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use vte::prelude::*;
 
-use crate::{logcat, streampane};
+use crate::{logcat, multi, streampane};
 use crate::state::State;
 use crate::term::{self, Kind, Launch};
 
@@ -122,6 +122,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) 
             (t, leaf)
         }
     };
+    let leaf = multi::wrap(&t, &leaf).upcast::<gtk::Widget>();
     leaf.add_css_class(LEAF_CLASS);
     leaf.set_hexpand(true);
     leaf.set_vexpand(true);

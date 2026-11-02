@@ -17,6 +17,7 @@ Milestone 1 plus the UI shell:
 - Command panel: pages of up to 50 buttons that send text or hex to the focused pane
 - Timestamps, regex highlight rules and logging to file in every pane
 - Android: live device list, adb shell, logcat view with filters, device files
+- Multi-exec, macros with expect, SSH tunnels (-L/-R/-D) with reconnect
 - Bottom dock and status bar
 - Live theme switching
 
@@ -81,6 +82,7 @@ GTK's GPU renderer.
 | Release all connections | Ctrl+Shift+R |
 | Toggle sidebar | Ctrl+Shift+B |
 | Toggle bottom panel | Ctrl+Shift+J |
+| Multi-exec | Ctrl+Shift+M |
 | Next / previous tab | Ctrl+PgDn / Ctrl+PgUp |
 | Go to tab N | Alt+1..9 |
 
@@ -94,6 +96,7 @@ File browser and transfers: [docs/files.md](docs/files.md).
 Command buttons: [docs/commands.md](docs/commands.md).
 Timestamps, highlight, logging: [docs/output.md](docs/output.md).
 Android devices: [docs/adb.md](docs/adb.md).
+Multi-exec, macros, tunnels: [docs/multiexec.md](docs/multiexec.md), [docs/macros.md](docs/macros.md), [docs/tunnels.md](docs/tunnels.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files
@@ -104,6 +107,7 @@ Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termv
 | `~/.config/termvisor/sessions.toml` | Saved sessions, see [docs/sessions.md](docs/sessions.md) |
 | `~/.config/termvisor/commands.toml` | Command panel pages, see [docs/commands.md](docs/commands.md) |
 | `~/.config/termvisor/highlight.toml` | Highlight rules, see [docs/output.md](docs/output.md) |
+| `~/.config/termvisor/macros.toml`, `tunnels.toml` | Macros and tunnels |
 | `~/.local/share/termvisor/logs/` | Session logs |
 | `~/.local/state/termvisor/recent.json`, `tabs.json` | Recent sessions, saved tabs |
 | `~/.config/termvisor/themes/*.json` | User themes, see [docs/themes.md](docs/themes.md) |

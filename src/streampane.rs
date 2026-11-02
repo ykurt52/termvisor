@@ -128,13 +128,26 @@ fn shown(bytes: &[u8], hex: bool) -> String {
     }
 }
 
+fn pane_of(t: &vte::Terminal) -> Option<Rc<Pane>> {
+    PANES.with(|v| v.borrow().iter().find(|(w, _)| w.upgrade().as_ref() == Some(t)).and_then(|(_, p)| p.upgrade()))
+}
+
+/// Sends `text` to the stream pane that shows `t` as if typed there.
+/// Returns false when `t` is not a stream pane.
+pub fn type_text(t: &vte::Terminal, text: &str) -> bool {
+    match pane_of(t) {
+        Some(p) => {
+            p.typed(text);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Writes raw bytes to the link of the stream pane that shows `t`.
 /// Returns false when `t` is not a stream pane.
 pub fn write(t: &vte::Terminal, bytes: &[u8], hex: bool) -> bool {
-    let pane = PANES.with(|v| {
-        v.borrow().iter().find(|(w, _)| w.upgrade().as_ref() == Some(t)).and_then(|(_, p)| p.upgrade())
-    });
-    let Some(p) = pane else { return false };
+    let Some(p) = pane_of(t) else { return false };
     if p.xfer.borrow().is_some() {
         p.note("33", "file transfer running; sending is paused");
         return true;
@@ -208,6 +221,15 @@ impl Pane {
         self.mav.borrow_mut().reset();
         self.stats.set_visible(v == View::Mavlink);
         self.feed(b"\r\n");
+    }
+
+    /// Text typed by the user: Enter becomes the line ending.
+    fn typed(&self, text: &str) {
+        if self.xfer.borrow().is_some() {
+            self.note("33", "file transfer running; typing is paused");
+            return;
+        }
+        self.send(link::outgoing(text, self.eol.get()), &link::echo(text));
     }
 
     /// Sends bytes and echoes them when local echo is on.
@@ -870,14 +892,11 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
         pp.mav.borrow_mut().reset();
     });
 
-    // Typed text goes to the link.
+    // Typed text goes to the link (and to the other multi-exec panes).
     let pp = p.clone();
-    t.connect_commit(move |_, text, _| {
-        if pp.xfer.borrow().is_some() {
-            pp.note("33", "file transfer running; typing is paused");
-            return;
-        }
-        pp.send(link::outgoing(text, pp.eol.get()), &link::echo(text));
+    t.connect_commit(move |t, text, _| {
+        pp.typed(text);
+        crate::multi::typed(t, text);
     });
 
     // Closing the pane drops the link and tells the mirrors.

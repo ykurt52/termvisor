@@ -6,12 +6,11 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use adw::prelude::*;
-use gtk::{gdk, gio, glib, glib::translate::IntoGlib, graphene};
-use vte::prelude::*;
+use gtk::{gdk, gio, glib, graphene};
 
 use crate::commands::{self, Button, Ending, Page, MAX_BUTTONS};
 use crate::state::State;
-use crate::streampane;
+use crate::{keys, multi};
 
 /// Shown name and stored value of button colors.
 const COLORS: &[(&str, Option<&str>)] = &[
@@ -259,19 +258,9 @@ impl Panel {
         for (i, key) in keys {
             let Some(trigger) = gtk::ShortcutTrigger::parse_string(&key) else { continue };
             let panel = self.widget.downgrade();
-            // Only while a terminal has the focus; dialogs and entries keep their keys.
-            let action = gtk::CallbackAction::new(move |w, _| {
-                let in_term = w
-                    .downcast_ref::<gtk::Window>()
-                    .and_then(gtk::prelude::GtkWindowExt::focus)
-                    .and_then(|f| f.ancestor(vte::Terminal::static_type()))
-                    .is_some();
-                match panel.upgrade() {
-                    Some(p) if in_term => {
-                        let _ = WidgetExt::activate_action(&p, "cmd.send", Some(&(i as u32).to_variant()));
-                        glib::Propagation::Stop
-                    }
-                    _ => glib::Propagation::Proceed,
+            let action = keys::in_terminal(move |_| {
+                if let Some(p) = panel.upgrade() {
+                    let _ = WidgetExt::activate_action(&p, "cmd.send", Some(&(i as u32).to_variant()));
                 }
             });
             self.keys.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
@@ -304,7 +293,7 @@ impl Panel {
 
     fn make(&self, i: usize, b: &Button, key: Option<String>) -> gtk::Button {
         let label = if b.label.is_empty() { "(no label)" } else { &b.label };
-        let shown = key.as_deref().map(key_label);
+        let shown = key.as_deref().map(keys::label);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         row.append(&gtk::Label::new(Some(label)));
         if let Some(k) = &shown {
@@ -369,10 +358,15 @@ impl Panel {
             Ok(c) => c,
             Err(e) => return self.toast(&format!("{}: {e}", b.label)),
         };
-        let Some(t) = self.target.borrow().as_ref().and_then(|f| f()) else {
+        // Multi-exec sends to every selected pane.
+        let picked = if multi::on() { multi::targets() } else { Vec::new() };
+        let targets = if picked.is_empty() { self.target.borrow().as_ref().and_then(|f| f()).into_iter().collect() } else { picked };
+        if targets.is_empty() {
             return self.toast("No terminal to send to; open or focus a pane first");
-        };
-        send(&t, chunks, b.hex, b.delay_ms);
+        }
+        for t in targets {
+            send(&t, chunks.clone(), b.hex, b.delay_ms);
+        }
     }
 
     fn shift(&self, from: usize, to: usize) {
@@ -545,9 +539,7 @@ fn send(t: &vte::Terminal, chunks: Vec<Vec<u8>>, hex: bool, delay_ms: u32) {
         let w = t.downgrade();
         let go = move || {
             if let Some(t) = w.upgrade() {
-                if !streampane::write(&t, &c, hex) {
-                    t.feed_child(&c);
-                }
+                multi::deliver(&t, &c, hex);
             }
         };
         if wait == 0 {
@@ -557,11 +549,6 @@ fn send(t: &vte::Terminal, chunks: Vec<Vec<u8>>, hex: bool, delay_ms: u32) {
         }
         wait += u64::from(delay_ms);
     }
-}
-
-/// "Ctrl+1" for "<Control>1".
-fn key_label(key: &str) -> String {
-    gtk::accelerator_parse(key).map(|(k, m)| gtk::accelerator_get_label(k, m).to_string()).unwrap_or_else(|| key.to_string())
 }
 
 fn preview(b: &Button) -> String {
@@ -736,29 +723,6 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
     let names: Vec<&str> = COLORS.iter().map(|c| c.0).collect();
     let color = combo("Color", &names, COLORS.iter().position(|c| c.1 == init.color.as_deref()).unwrap_or(0));
 
-    let key: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(init.key.clone()));
-    let shortcut = adw::ActionRow::new();
-    shortcut.set_title("Shortcut");
-    shortcut.set_subtitle("Works while a terminal has the focus");
-    let accel = gtk::ShortcutLabel::new(init.key.as_deref().unwrap_or(""));
-    accel.set_disabled_text("None");
-    accel.set_valign(gtk::Align::Center);
-    let record = gtk::ToggleButton::with_label("Set…");
-    record.set_valign(gtk::Align::Center);
-    let clear = gtk::Button::from_icon_name("edit-clear-symbolic");
-    clear.add_css_class("flat");
-    clear.set_valign(gtk::Align::Center);
-    clear.set_tooltip_text(Some("No shortcut"));
-    shortcut.add_suffix(&accel);
-    shortcut.add_suffix(&record);
-    shortcut.add_suffix(&clear);
-    record.connect_toggled(|b| b.set_label(if b.is_active() { "Press keys…" } else { "Set…" }));
-    let (k, a) = (key.clone(), accel.clone());
-    clear.connect_clicked(move |_| {
-        k.replace(None);
-        a.set_accelerator("");
-    });
-
     let top = adw::PreferencesGroup::new();
     top.add(&label);
     let body = adw::PreferencesGroup::new();
@@ -769,7 +733,6 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
     opts.add(&eol);
     opts.add(&delay);
     opts.add(&color);
-    opts.add(&shortcut);
 
     let sync = {
         let (mode, eol, delay, body) = (mode.clone(), eol.clone(), delay.clone(), body.clone());
@@ -808,37 +771,8 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
     dlg.set_content_height(600);
     dlg.set_child(Some(&view));
 
-    // While "Set…" is on, the next key combination becomes the shortcut.
-    let catch = gtk::EventControllerKey::new();
-    catch.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let (k, a, r, t) = (key.clone(), accel.clone(), record.clone(), toasts.clone());
-    catch.connect_key_pressed(move |_, keyval, _, state| {
-        if !r.is_active() {
-            return glib::Propagation::Proceed;
-        }
-        let mods = state & gtk::accelerator_get_default_mod_mask();
-        if keyval == gdk::Key::Escape && mods.is_empty() {
-            r.set_active(false);
-            return glib::Propagation::Stop;
-        }
-        // Modifier alone: wait for the rest.
-        if !gtk::accelerator_valid(keyval, mods) {
-            return glib::Propagation::Stop;
-        }
-        let v = keyval.into_glib();
-        let fkey = (gdk::Key::F1.into_glib()..=gdk::Key::F35.into_glib()).contains(&v);
-        let held = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK;
-        if !fkey && !mods.intersects(held) {
-            t.add_toast(adw::Toast::new("Use Ctrl, Alt or Super with this key, or a function key"));
-            return glib::Propagation::Stop;
-        }
-        let name = gtk::accelerator_name(keyval, mods).to_string();
-        a.set_accelerator(&name);
-        k.replace(Some(name));
-        r.set_active(false);
-        glib::Propagation::Stop
-    });
-    dlg.add_controller(catch);
+    let (shortcut, key) = keys::row(init.key.as_deref(), &dlg, &toasts);
+    opts.add(&shortcut);
 
     let d = dlg.clone();
     cancel.connect_clicked(move |_| {

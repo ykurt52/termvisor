@@ -23,6 +23,8 @@ pub struct State {
     pub recent: RefCell<Vec<Recent>>,
     /// Transfer queue and list, shared by all windows.
     pub xfers: Rc<Xfers>,
+    /// SSH tunnels, shared by all windows.
+    pub tunnels: Rc<crate::tunnels::Manager>,
     /// Command panel pages, shared by all windows.
     pub commands: RefCell<Vec<Page>>,
     cmd_listeners: RefCell<Vec<Box<dyn Fn()>>>,
@@ -56,6 +58,7 @@ impl State {
             recent: RefCell::new(recent::load(recent::RECENT)),
             xfers: Xfers::new(),
             commands: RefCell::new(commands::load()),
+            tunnels: crate::tunnels::Manager::new(),
             cmd_listeners: RefCell::new(Vec::new()),
             listeners: RefCell::new(Vec::new()),
             notice: RefCell::new(None),

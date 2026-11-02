@@ -285,19 +285,27 @@ fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
         ];
         argv.splice(1..1, opts);
     }
+    env.extend(ssh_env(&launch.target, launch.keyring));
+    (argv, env)
+}
+
+/// Environment ("KEY=value") that makes ssh ask for passwords through
+/// termvisor's dialogs; `target` names the host in them.
+pub fn ssh_env(target: &str, keyring: bool) -> Vec<String> {
+    let mut env = Vec::new();
     match std::env::current_exe() {
         Ok(exe) => {
             env.push(format!("SSH_ASKPASS={}", exe.display()));
             env.push("SSH_ASKPASS_REQUIRE=force".into());
             env.push(format!("{}=1", askpass::ENV_MODE));
-            env.push(format!("{}={}", askpass::ENV_TARGET, launch.target));
-            if !launch.keyring {
+            env.push(format!("{}={target}", askpass::ENV_TARGET));
+            if !keyring {
                 env.push(format!("{}=1", askpass::ENV_NO_STORE));
             }
         }
         Err(e) => crate::warn(&format!("askpass disabled: {e}")),
     }
-    (argv, env)
+    env
 }
 
 /// Starts (or restarts) the child process of `term` on its own pty.

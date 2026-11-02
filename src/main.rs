@@ -10,11 +10,15 @@ mod editor;
 mod files;
 mod ftp;
 mod keyring;
+mod keys;
 mod link;
+mod macropage;
+mod macros;
 mod logcat;
 mod logpanel;
 mod mav;
 mod modem;
+mod multi;
 mod palette;
 mod pty;
 mod pane;
@@ -36,6 +40,8 @@ mod store;
 mod term;
 mod theme;
 mod transfers;
+mod tunnelpage;
+mod tunnels;
 mod watchdog;
 mod welcome;
 mod window;
@@ -102,6 +108,7 @@ fn main() -> glib::ExitCode {
     app.connect_activate(move |app| {
         let st = state.get_or_init(|| {
             let st = State::new();
+            st.tunnels.start_auto();
             let r = recover::tidy();
             if !r.is_empty() {
                 st.notice.replace(Some(format!("Startup cleanup: {}", r.summary())));

@@ -263,9 +263,15 @@ Arch containers, release packages on tag.
     sessions per serial, logcat view with level/tag/PID filters and colors,
     file panel over `adb push`/`pull`, reconnect on replug.
 11. Tunnels, multi-exec, macros.
-12. Tools: TFTP, HTTP server, scanner, ping, WOL.
-13. Theme editor, settings UI, keybindings.
-14. Packaging and CI.
+12. USB sniffer: passive capture through the kernel's usbmon (no effect
+    on the traffic), device/bus picker, control/bulk/interrupt/iso
+    transfers with setup packets, status and timestamps, decoders for
+    CDC-ACM/FTDI serial data, HID and mass storage, pcap export.
+    One-time permission setup for /dev/usbmon*. Electrical and bit level
+    events (NAK, CRC, SOF) need a hardware analyzer and are out of scope.
+13. Tools: TFTP, HTTP server, scanner, ping, WOL.
+14. Theme editor, settings UI, keybindings.
+15. Packaging and CI.
 
 ## Backlog
 

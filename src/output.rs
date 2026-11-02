@@ -495,6 +495,10 @@ pub struct Out {
     pub title: String,
     pub filter: Filter,
     pub log: Option<Log>,
+    /// Text of the output without escape sequences, one buffer per running
+    /// macro.
+    pub taps: Vec<Rc<RefCell<String>>>,
+    tap_strip: Strip,
 }
 
 impl Out {
@@ -507,6 +511,14 @@ impl Out {
 
     /// Logs without screen processing (hex and MAVLink views).
     pub fn record(&mut self, data: &[u8]) {
+        if !self.taps.is_empty() {
+            let mut text = Vec::with_capacity(data.len());
+            self.tap_strip.feed(data, &mut text);
+            let text = String::from_utf8_lossy(&text);
+            for tap in &self.taps {
+                tap.borrow_mut().push_str(&text);
+            }
+        }
         let stamps = self.filter.stamps;
         let clock = self.filter.clock;
         if let Some(l) = self.log.as_mut() {
@@ -539,7 +551,13 @@ impl Out {
 
 /// Creates the pipeline of terminal `t` with the defaults from settings.
 pub fn attach(t: &vte::Terminal, title: &str, cfg: &settings::Settings) -> Rc<RefCell<Out>> {
-    let mut out = Out { title: title.to_string(), filter: Filter::new(cfg.timestamps, cfg.highlight), log: None };
+    let mut out = Out {
+        title: title.to_string(),
+        filter: Filter::new(cfg.timestamps, cfg.highlight),
+        log: None,
+        taps: Vec::new(),
+        tap_strip: Strip::default(),
+    };
     if let Err(e) = out.set_mode(cfg.log) {
         crate::warn(&format!("log for {title}: {e}"));
     }
