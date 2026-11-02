@@ -11,6 +11,7 @@ Milestone 1 plus the UI shell:
 - Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`)
 - Serial, raw TCP and telnet panes: Text / Hex / MAVLink views, ASCII and hex send bar
 - Serial locking, mirror and auto-reconnect
+- SFTP file panel on the active SSH tab, transfer queue with progress
 - Tabs with nested split panes, start page when no tab is open
 - Bottom dock and status bar
 - Live theme switching
@@ -64,6 +65,7 @@ An SSH pane stays open when the session ends; press Enter to reconnect.
 SSH prompts, connection sharing and the keyring: [docs/ssh.md](docs/ssh.md).
 Serial ports, locking, mirror and reconnect: [docs/serial.md](docs/serial.md).
 TCP, telnet, hex and MAVLink views, send bar: [docs/streams.md](docs/streams.md).
+File browser and transfers: [docs/files.md](docs/files.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files

@@ -252,7 +252,8 @@ Arch containers, release packages on tag.
 4. Serial: port picker, lock, mirror, hex view, line endings, reconnect.
 5. Recovery: startup cleanup, Release All, `--release-all`, watchdog.
 6. Telnet, Raw TCP, Mosh; binary send bar, hex+ASCII view, MAVLink decoder.
-7. File browser and transfer queue (SFTP, FTP/FTPS).
+7. File browser and transfer queue: 7a SFTP browser + queue, 7b FTP/FTPS,
+   remote edit, follow cwd, resume, dual pane.
 8. XMODEM / YMODEM / ZMODEM.
 9. Command panel, highlight rules, timestamps, logging.
 10. Tunnels, multi-exec, macros.

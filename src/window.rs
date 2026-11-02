@@ -86,6 +86,7 @@ impl Ui {
         let launch = self.active().and_then(|t| self.state.launch(&t));
         let theme = self.state.theme().map(|t| t.name.clone()).unwrap_or_default();
         self.status.show(launch.as_ref(), &theme);
+        self.sidebar.files.attach(launch.as_ref());
     }
 
     /// Launch of the first pane in each tab; shells keep their current dir.
@@ -255,7 +256,7 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     main.add_named(&tabs, Some("tabs"));
     main.set_visible_child_name("welcome");
 
-    let dock = dock::build();
+    let dock = dock::build(state);
     let vsplit = gtk::Paned::new(gtk::Orientation::Vertical);
     vsplit.set_start_child(Some(&main));
     vsplit.set_end_child(Some(&dock));

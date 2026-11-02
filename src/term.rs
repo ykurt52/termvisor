@@ -283,3 +283,53 @@ pub fn found(prog: &str) -> bool {
         })
     })
 }
+
+/// Program arguments and extra environment for an SFTP session.
+pub type SftpCmd = (Vec<String>, Vec<(String, String)>);
+
+/// `ssh … -s -- host sftp` for an SSH launch, sharing its connection and
+/// prompts. None for other kinds.
+pub fn sftp_command(launch: &Launch) -> Option<SftpCmd> {
+    if launch.kind != Kind::Ssh {
+        return None;
+    }
+    let (argv, env) = command(launch);
+    let (prog, rest) = argv.split_first()?;
+    let (opts, host) = match rest.iter().position(|a| a == "--") {
+        Some(i) => (&rest[..i], rest.get(i + 1)?.clone()),
+        None => {
+            let (h, o) = rest.split_last()?;
+            (o, h.clone())
+        }
+    };
+    let mut cmd = vec![prog.clone()];
+    cmd.extend(opts.iter().cloned());
+    cmd.extend(["-s".to_string(), "--".into(), host, "sftp".into()]);
+    let env = env
+        .into_iter()
+        .filter_map(|kv| kv.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+        .collect();
+    Some((cmd, env))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sftp_from_ssh_launch() {
+        let l = Launch::ssh(vec!["-p".into(), "2222".into(), "--".into(), "board".into()], "board:2222");
+        let (cmd, env) = sftp_command(&l).expect("cmd");
+        let tail: Vec<&str> = cmd.iter().rev().take(4).rev().map(String::as_str).collect();
+        assert_eq!(tail, ["-s", "--", "board", "sftp"]);
+        assert!(cmd.windows(2).any(|w| w[0] == "-p" && w[1] == "2222"));
+        assert!(env.iter().any(|(k, v)| k == "SSH_ASKPASS_REQUIRE" && v == "force"));
+
+        let quick = Launch::ssh(vec!["root@10.0.0.2".into()], "root@10.0.0.2");
+        let (cmd, _) = sftp_command(&quick).expect("cmd");
+        assert_eq!(cmd.last().map(String::as_str), Some("sftp"));
+        assert!(cmd.contains(&"root@10.0.0.2".to_string()));
+
+        assert!(sftp_command(&Launch::shell(None)).is_none());
+    }
+}

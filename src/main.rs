@@ -3,6 +3,7 @@
 mod askpass;
 mod dock;
 mod editor;
+mod files;
 mod keyring;
 mod link;
 mod mav;
@@ -15,15 +16,18 @@ mod sessions;
 mod serial;
 mod streampane;
 mod settings;
+mod sftp;
 mod sidebar;
 mod state;
 mod status;
 mod store;
 mod term;
 mod theme;
+mod transfers;
 mod watchdog;
 mod welcome;
 mod window;
+mod xfers;
 
 use std::cell::OnceCell;
 use std::rc::Rc;

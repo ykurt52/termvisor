@@ -11,12 +11,15 @@ use crate::settings::{self, Settings};
 use crate::store::Store;
 use crate::term::Launch;
 use crate::theme::{self, Theme};
+use crate::xfers::Xfers;
 
 pub struct State {
     pub themes: Vec<Theme>,
     pub cfg: RefCell<Settings>,
     pub store: RefCell<Store>,
     pub recent: RefCell<Vec<Recent>>,
+    /// Transfer queue and list, shared by all windows.
+    pub xfers: Rc<Xfers>,
     listeners: RefCell<Vec<Box<dyn Fn()>>>,
     /// One-time message for the first window (e.g. startup cleanup).
     pub notice: RefCell<Option<String>>,
@@ -43,6 +46,7 @@ impl State {
             cfg: RefCell::new(Settings::load()),
             store: RefCell::new(Store::load()),
             recent: RefCell::new(recent::load(recent::RECENT)),
+            xfers: Xfers::new(),
             listeners: RefCell::new(Vec::new()),
             notice: RefCell::new(None),
             terms: RefCell::new(Vec::new()),

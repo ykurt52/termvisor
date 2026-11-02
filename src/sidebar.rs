@@ -7,6 +7,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::editor::{self, Mode};
+use crate::files::Files;
 use crate::sessions::{self, Node, NodeKind};
 use crate::state::State;
 use crate::store::{self, Entry, Folder, Ssh};
@@ -19,7 +20,7 @@ pub type OpenFn = Rc<dyn Fn(Result<Launch, String>)>;
 /// id, icon, title, placeholder text (None = real page).
 const PAGES: &[(&str, &str, &str, Option<&str>)] = &[
     ("sessions", "network-server-symbolic", "Sessions", None),
-    ("files", "folder-symbolic", "Files", Some("SFTP and FTP browser. Planned for milestone 7.")),
+    ("files", "folder-symbolic", "Files", None),
     ("tunnels", "network-transmit-receive-symbolic", "Tunnels", Some("SSH tunnel manager. Planned for milestone 10.")),
     ("macros", "media-record-symbolic", "Macros", Some("Recorded and scripted macros. Planned for milestone 10.")),
     ("tools", "applications-utilities-symbolic", "Tools", Some("TFTP, HTTP server, port scanner, ping. Planned for milestone 11.")),
@@ -29,6 +30,7 @@ const PAGES: &[(&str, &str, &str, Option<&str>)] = &[
 pub struct Sidebar {
     pub bar: gtk::Box,
     pub panel: gtk::Box,
+    pub files: Files,
     stack: gtk::Stack,
     buttons: Rc<Vec<(&'static str, gtk::Button)>>,
 }
@@ -42,9 +44,11 @@ impl Sidebar {
         stack.set_transition_type(gtk::StackTransitionType::Crossfade);
         stack.set_vexpand(true);
 
+        let files = Files::new(state);
         let mut buttons = Vec::new();
         for &(id, icon, title, note) in PAGES {
             let page = match note {
+                None if id == "files" => files.widget.clone().upcast::<gtk::Widget>(),
                 None => sessions_page(state, open.clone()).upcast::<gtk::Widget>(),
                 Some(text) => placeholder(icon, text).upcast::<gtk::Widget>(),
             };
@@ -63,7 +67,7 @@ impl Sidebar {
         panel.set_size_request(240, -1);
         panel.append(&stack);
 
-        let sb = Self { bar, panel, stack, buttons: Rc::new(buttons) };
+        let sb = Self { bar, panel, files, stack, buttons: Rc::new(buttons) };
         for (id, b) in sb.buttons.iter() {
             let s = sb.clone();
             let id = *id;

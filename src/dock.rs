@@ -1,23 +1,34 @@
 // Bottom dock: command panel, transfers, log.
 
+use std::rc::Rc;
+
 use gtk::prelude::*;
 
-/// id, title, icon, placeholder text.
-const PAGES: &[(&str, &str, &str, &str)] = &[
-    ("commands", "Commands", "input-keyboard-symbolic", "Command buttons, up to 50 per page. Planned for milestone 9."),
-    ("transfers", "Transfers", "folder-download-symbolic", "Transfer queue. Planned for milestone 7."),
-    ("log", "Log", "text-x-generic-symbolic", "Session log. Planned for milestone 9."),
+use crate::state::State;
+use crate::xfers;
+
+/// id, title, icon, placeholder text (None = real page).
+const PAGES: &[(&str, &str, &str, Option<&str>)] = &[
+    ("commands", "Commands", "input-keyboard-symbolic", Some("Command buttons, up to 50 per page. Planned for milestone 9.")),
+    ("transfers", "Transfers", "folder-download-symbolic", None),
+    ("log", "Log", "text-x-generic-symbolic", Some("Session log. Planned for milestone 9.")),
 ];
 
-pub fn build() -> gtk::Box {
+pub fn build(state: &Rc<State>) -> gtk::Box {
     let stack = gtk::Stack::new();
     stack.set_vexpand(true);
     for &(id, title, icon, text) in PAGES {
-        let p = adw::StatusPage::new();
-        p.set_icon_name(Some(icon));
-        p.set_description(Some(text));
-        p.add_css_class("compact");
-        stack.add_titled(&p, Some(id), title);
+        let page: gtk::Widget = match text {
+            None => xfers::page(&state.xfers).upcast(),
+            Some(text) => {
+                let p = adw::StatusPage::new();
+                p.set_icon_name(Some(icon));
+                p.set_description(Some(text));
+                p.add_css_class("compact");
+                p.upcast()
+            }
+        };
+        stack.add_titled(&page, Some(id), title);
     }
 
     let switcher = gtk::StackSwitcher::new();
