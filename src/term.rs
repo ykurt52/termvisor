@@ -9,14 +9,21 @@ use gtk::{gio, glib, pango, prelude::*};
 use vte::prelude::*;
 
 use crate::askpass;
+use serde::{Deserialize, Serialize};
+
+use crate::link::StreamOpts;
+use crate::net::NetCfg;
 use crate::serial::SerialCfg;
 use crate::state::State;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Shell,
     Ssh,
     Serial,
+    Tcp,
+    Telnet,
+    Mosh,
 }
 
 impl Kind {
@@ -25,6 +32,9 @@ impl Kind {
             Kind::Shell => "Shell",
             Kind::Ssh => "SSH",
             Kind::Serial => "Serial",
+            Kind::Tcp => "TCP",
+            Kind::Telnet => "Telnet",
+            Kind::Mosh => "Mosh",
         }
     }
 
@@ -33,6 +43,50 @@ impl Kind {
             Kind::Shell => "utilities-terminal-symbolic",
             Kind::Ssh => "network-server-symbolic",
             Kind::Serial => "media-removable-symbolic",
+            Kind::Tcp => "network-transmit-receive-symbolic",
+            Kind::Telnet => "network-wired-symbolic",
+            Kind::Mosh => "network-wireless-symbolic",
+        }
+    }
+}
+
+/// Byte-stream session handled in-process (no child program).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Stream {
+    Serial(SerialCfg),
+    Tcp(NetCfg),
+    Telnet(NetCfg),
+}
+
+impl Stream {
+    pub fn opts(&self) -> &StreamOpts {
+        match self {
+            Stream::Serial(c) => &c.opts,
+            Stream::Tcp(c) | Stream::Telnet(c) => &c.opts,
+        }
+    }
+
+    pub fn kind(&self) -> Kind {
+        match self {
+            Stream::Serial(_) => Kind::Serial,
+            Stream::Tcp(_) => Kind::Tcp,
+            Stream::Telnet(_) => Kind::Telnet,
+        }
+    }
+
+    /// e.g. "/dev/ttyUSB0 115200 8N1" or "10.0.0.2:5760".
+    pub fn desc(&self) -> String {
+        match self {
+            Stream::Serial(c) => format!("{} {}", c.device, c.summary()),
+            Stream::Tcp(c) | Stream::Telnet(c) => c.addr(),
+        }
+    }
+
+    fn short(&self) -> String {
+        match self {
+            Stream::Serial(c) => c.device.rsplit('/').next().unwrap_or(&c.device).to_string(),
+            Stream::Tcp(c) | Stream::Telnet(c) => c.addr(),
         }
     }
 }
@@ -47,8 +101,8 @@ pub struct Launch {
     pub target: String,
     /// Allow the keyring for passwords (ssh only).
     pub keyring: bool,
-    /// Port settings (serial only).
-    pub serial: Option<SerialCfg>,
+    /// In-process byte stream (serial, TCP, telnet).
+    pub stream: Option<Stream>,
 }
 
 impl Launch {
@@ -60,7 +114,7 @@ impl Launch {
             title: "Shell".into(),
             target: "local".into(),
             keyring: false,
-            serial: None,
+            stream: None,
         }
     }
 
@@ -75,20 +129,27 @@ impl Launch {
             title: target.to_string(),
             target: target.to_string(),
             keyring: true,
-            serial: None,
+            stream: None,
         }
     }
 
-    pub fn serial(cfg: SerialCfg) -> Self {
-        let name = cfg.device.rsplit('/').next().unwrap_or(&cfg.device).to_string();
+    /// `mosh <args>`; ssh prompts go through askpass like ssh sessions.
+    pub fn mosh(args: Vec<String>, target: &str) -> Self {
+        let mut l = Self::ssh(args, target);
+        l.kind = Kind::Mosh;
+        l.argv[0] = "mosh".into();
+        l
+    }
+
+    pub fn stream(s: Stream) -> Self {
         Self {
-            kind: Kind::Serial,
+            kind: s.kind(),
             argv: Vec::new(),
             dir: None,
-            title: name,
-            target: format!("{} {}", cfg.device, cfg.summary()),
+            title: s.short(),
+            target: s.desc(),
             keyring: false,
-            serial: Some(cfg),
+            stream: Some(s),
         }
     }
 }
@@ -139,10 +200,10 @@ pub fn mux_dir() -> Option<PathBuf> {
 fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
     let mut argv = launch.argv.clone();
     let mut env = Vec::new();
-    if launch.kind != Kind::Ssh {
+    if launch.kind != Kind::Ssh && launch.kind != Kind::Mosh {
         return (argv, env);
     }
-    if let Some(dir) = mux_dir() {
+    if let (Kind::Ssh, Some(dir)) = (launch.kind, mux_dir()) {
         let opts = [
             "-o".to_string(),
             "ControlMaster=auto".into(),
@@ -170,8 +231,8 @@ fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
 
 /// Starts (or restarts) the child process of `term`.
 pub fn run(term: &vte::Terminal, launch: &Launch) {
-    // Serial panes have no child process; the serial pane feeds them.
-    if launch.kind == Kind::Serial {
+    // Stream panes have no child process; the stream pane feeds them.
+    if launch.stream.is_some() {
         return;
     }
     let (full, env) = command(launch);
@@ -211,4 +272,14 @@ pub fn scroll(term: &vte::Terminal) -> gtk::ScrolledWindow {
     sw.set_vexpand(true);
     sw.set_child(Some(term));
     sw
+}
+
+/// True when `prog` is an executable on PATH.
+pub fn found(prog: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|d| {
+            fs::metadata(d.join(prog)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+    })
 }

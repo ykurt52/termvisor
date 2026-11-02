@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::serial::SerialCfg;
 use crate::settings;
-use crate::term::Launch;
+use crate::net::NetCfg;
+use crate::term::{Launch, Stream};
 
 const VERSION: u32 = 1;
 
@@ -97,6 +98,19 @@ pub struct Serial {
     pub favorite: bool,
 }
 
+/// Raw TCP or telnet session.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Net {
+    pub name: String,
+    #[serde(flatten)]
+    pub cfg: NetCfg,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub favorite: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Entry {
@@ -104,42 +118,50 @@ pub enum Entry {
     Ssh(Ssh),
     Shell(Shell),
     Serial(Serial),
+    Tcp(Net),
+    Telnet(Net),
+    /// Same fields as ssh; ssh options apply to mosh's ssh bootstrap.
+    Mosh(Ssh),
 }
 
 impl Entry {
     pub fn name(&self) -> &str {
         match self {
             Entry::Folder(f) => &f.name,
-            Entry::Ssh(s) => &s.name,
+            Entry::Ssh(s) | Entry::Mosh(s) => &s.name,
             Entry::Shell(s) => &s.name,
             Entry::Serial(s) => &s.name,
+            Entry::Tcp(n) | Entry::Telnet(n) => &n.name,
         }
     }
 
     pub fn color(&self) -> Option<&str> {
         match self {
             Entry::Folder(f) => f.color.as_deref(),
-            Entry::Ssh(s) => s.color.as_deref(),
+            Entry::Ssh(s) | Entry::Mosh(s) => s.color.as_deref(),
             Entry::Shell(s) => s.color.as_deref(),
             Entry::Serial(s) => s.color.as_deref(),
+            Entry::Tcp(n) | Entry::Telnet(n) => n.color.as_deref(),
         }
     }
 
     pub fn set_name(&mut self, name: String) {
         match self {
             Entry::Folder(f) => f.name = name,
-            Entry::Ssh(s) => s.name = name,
+            Entry::Ssh(s) | Entry::Mosh(s) => s.name = name,
             Entry::Shell(s) => s.name = name,
             Entry::Serial(s) => s.name = name,
+            Entry::Tcp(n) | Entry::Telnet(n) => n.name = name,
         }
     }
 
     pub fn set_favorite(&mut self, on: bool) {
         match self {
             Entry::Folder(_) => {}
-            Entry::Ssh(s) => s.favorite = on,
+            Entry::Ssh(s) | Entry::Mosh(s) => s.favorite = on,
             Entry::Shell(s) => s.favorite = on,
             Entry::Serial(s) => s.favorite = on,
+            Entry::Tcp(n) | Entry::Telnet(n) => n.favorite = on,
         }
     }
 
@@ -154,9 +176,10 @@ impl Entry {
     pub fn favorite(&self) -> bool {
         match self {
             Entry::Folder(_) => false,
-            Entry::Ssh(s) => s.favorite,
+            Entry::Ssh(s) | Entry::Mosh(s) => s.favorite,
             Entry::Shell(s) => s.favorite,
             Entry::Serial(s) => s.favorite,
+            Entry::Tcp(n) | Entry::Telnet(n) => n.favorite,
         }
     }
 }
@@ -184,7 +207,8 @@ fn arg_ok(field: &str, v: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn ssh_launch(s: &Ssh, opts: &SshOpts) -> Result<Launch, String> {
+/// ssh options (without the host) and the display target.
+fn ssh_args(s: &Ssh, opts: &SshOpts) -> Result<(Vec<String>, String), String> {
     let host = s.host.trim();
     if host.is_empty() {
         return Err(format!("'{}': host is empty", s.name));
@@ -215,7 +239,6 @@ fn ssh_launch(s: &Ssh, opts: &SshOpts) -> Result<Launch, String> {
     if let Some(extra) = &opts.args {
         args.extend(extra.iter().cloned());
     }
-    args.extend(["--".to_string(), host.to_string()]);
 
     let mut target = host.to_string();
     if let Some(u) = &opts.user {
@@ -224,9 +247,39 @@ fn ssh_launch(s: &Ssh, opts: &SshOpts) -> Result<Launch, String> {
     if let Some(p) = opts.port.filter(|p| *p != 22) {
         target = format!("{target}:{p}");
     }
+    Ok((args, target))
+}
+
+fn ssh_launch(s: &Ssh, opts: &SshOpts) -> Result<Launch, String> {
+    let (mut args, target) = ssh_args(s, opts)?;
+    args.extend(["--".to_string(), s.host.trim().to_string()]);
     let mut l = Launch::ssh(args, &target);
     l.title = s.name.clone();
     l.keyring = !s.no_store;
+    Ok(l)
+}
+
+/// `mosh --ssh="ssh <opts>" -- host`. mosh splits the ssh command on
+/// spaces, so option values must not contain whitespace or quotes.
+fn mosh_launch(s: &Ssh, opts: &SshOpts) -> Result<Launch, String> {
+    let (ssh, target) = ssh_args(s, opts)?;
+    if let Some(bad) = ssh.iter().find(|a| a.contains(|c: char| c.is_whitespace() || c == '"' || c == '\'')) {
+        return Err(format!("'{}': mosh cannot pass ssh option '{bad}'", s.name));
+    }
+    let mut cmd = vec!["ssh".to_string()];
+    cmd.extend(ssh);
+    let args = vec![format!("--ssh={}", cmd.join(" ")), "--".into(), s.host.trim().to_string()];
+    let mut l = Launch::mosh(args, &target);
+    l.title = s.name.clone();
+    l.keyring = !s.no_store;
+    Ok(l)
+}
+
+fn net_launch(n: &Net, telnet: bool) -> Result<Launch, String> {
+    n.cfg.check().map_err(|e| format!("'{}': {e}", n.name))?;
+    let s = if telnet { Stream::Telnet(n.cfg.clone()) } else { Stream::Tcp(n.cfg.clone()) };
+    let mut l = Launch::stream(s);
+    l.title = n.name.clone();
     Ok(l)
 }
 
@@ -261,10 +314,13 @@ pub fn resolve(root: &[Entry], path: &[usize]) -> Result<Launch, String> {
         }
         Some(Entry::Serial(s)) => {
             s.cfg.check().map_err(|e| format!("'{}': {e}", s.name))?;
-            let mut l = Launch::serial(s.cfg.clone());
+            let mut l = Launch::stream(Stream::Serial(s.cfg.clone()));
             l.title = s.name.clone();
             Ok(l)
         }
+        Some(Entry::Tcp(n)) => net_launch(n, false),
+        Some(Entry::Telnet(n)) => net_launch(n, true),
+        Some(Entry::Mosh(s)) => mosh_launch(s, &s.opts.inherit(&opts)),
         Some(Entry::Folder(_)) => Err("a folder is not a session".into()),
         None => Err("bad session path".into()),
     }
@@ -513,6 +569,7 @@ name = "UART4"
 device = "/dev/ttyS4"
 baud = 921600
 eol = "crlf"
+mavlink = true
 "#;
 
     #[test]
@@ -649,6 +706,53 @@ eol = "crlf"
             assert_eq!(import(&p).expect("import"), root, "{name}");
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn net_and_mosh_entries() {
+        let text = r#"
+version = 1
+
+[[node]]
+type = "telnet"
+name = "Router"
+host = "192.168.1.1"
+
+[[node]]
+type = "tcp"
+name = "SITL"
+host = "127.0.0.1"
+port = 5760
+mavlink = true
+
+[[node]]
+type = "mosh"
+name = "Box"
+host = "box.lan"
+user = "yk"
+port = 2222
+"#;
+        let root = parse(text).expect("parse");
+        assert_eq!(dump(&root).ok().and_then(|t| parse(&t).ok()), Some(root.clone()));
+
+        let telnet = resolve(&root, &[0]).expect("telnet");
+        assert_eq!(telnet.target, "192.168.1.1:23");
+        let tcp = resolve(&root, &[1]).expect("tcp");
+        assert_eq!(tcp.stream.as_ref().map(|s| s.opts().mavlink), Some(true));
+        let mosh = resolve(&root, &[2]).expect("mosh");
+        assert_eq!(mosh.argv, ["mosh", "--ssh=ssh -p 2222 -l yk", "--", "box.lan"]);
+        assert_eq!(mosh.target, "yk@box.lan:2222");
+    }
+
+    #[test]
+    fn mosh_rejects_spaces_in_ssh_options() {
+        let s = Ssh {
+            name: "m".into(),
+            host: "h".into(),
+            opts: SshOpts { key: Some("/my keys/id".into()), ..Default::default() },
+            ..Default::default()
+        };
+        assert!(resolve(&[Entry::Mosh(s)], &[0]).is_err());
     }
 
     #[test]

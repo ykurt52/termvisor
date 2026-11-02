@@ -3,6 +3,15 @@
 SSH sessions run the system `ssh` (OpenSSH 8.4 or newer). Your
 `~/.ssh/config`, agent, keys, ProxyJump and FIDO keys work as usual.
 
+## Mosh
+
+Session type `mosh` (or quick connect `mosh [user@]host`) runs the system
+`mosh` with the session's ssh options passed as `--ssh="ssh -p … -l …"`.
+Needs the `mosh` package locally and `mosh-server` on the host. Option
+values with spaces or quotes are refused, because mosh splits that command
+on spaces. Password and passphrase prompts use the same dialogs and keyring
+as SSH; connection sharing is not used.
+
 ## Connection sharing
 
 Every SSH tab adds:

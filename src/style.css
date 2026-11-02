@@ -138,6 +138,26 @@ tabbar tab:selected {
   color: @accent_color;
 }
 
+.statusbar.kind-net {
+  background-image: linear-gradient(90deg, @c_magenta, @c_red);
+  color: @window_bg_color;
+}
+
+.statusbar.kind-mosh {
+  background-image: linear-gradient(90deg, @c_cyan, @c_blue);
+  color: @window_bg_color;
+}
+
+.sendbar {
+  background-color: @headerbar_bg_color;
+  border-top: 1px solid @borders;
+  padding: 3px 6px;
+}
+
+.sendbar entry {
+  font-family: monospace;
+}
+
 .statusbar label {
   margin: 0 8px;
   font-weight: bold;

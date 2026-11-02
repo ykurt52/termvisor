@@ -90,6 +90,12 @@ Details in docs/recovery.md.
 - Copy on select, right-click paste (optional). Confirm multi-line paste.
 - Clickable URLs and file paths.
 
+Binary protocols (serial, TCP, telnet):
+
+- Views: Text, Hex (offset + ASCII column), MAVLink (common dialect,
+  CRC checked, name filter).
+- Send bar: ASCII with C escapes or hex bytes, input history.
+
 Serial extras:
 
 - Hex view.
@@ -245,7 +251,7 @@ Arch containers, release packages on tag.
 3. SSH with ControlMaster, host key handling, keyring.
 4. Serial: port picker, lock, mirror, hex view, line endings, reconnect.
 5. Recovery: startup cleanup, Release All, `--release-all`, watchdog.
-6. Telnet, Raw TCP, Mosh.
+6. Telnet, Raw TCP, Mosh; binary send bar, hex+ASCII view, MAVLink decoder.
 7. File browser and transfer queue (SFTP, FTP/FTPS).
 8. XMODEM / YMODEM / ZMODEM.
 9. Command panel, highlight rules, timestamps, logging.

@@ -78,6 +78,9 @@ fn stored(root: &[Entry], list: &[Entry], prefix: &[usize]) -> Vec<Node> {
                 Entry::Ssh(_) => ("network-server-symbolic", "tint-green", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Shell(_) => ("utilities-terminal-symbolic", "tint-blue", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Serial(_) => ("media-removable-symbolic", "tint-yellow", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Tcp(_) => ("network-transmit-receive-symbolic", "tint-magenta", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Telnet(_) => ("network-wired-symbolic", "tint-red", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Mosh(_) => ("network-wireless-symbolic", "tint-cyan", NodeKind::Item(store::resolve(root, &path))),
             };
             Node {
                 name: e.name().to_string(),
@@ -122,6 +125,9 @@ fn kind_look(k: Kind) -> (&'static str, &'static str) {
         Kind::Shell => ("utilities-terminal-symbolic", "tint-blue"),
         Kind::Ssh => ("network-server-symbolic", "tint-green"),
         Kind::Serial => ("media-removable-symbolic", "tint-yellow"),
+        Kind::Tcp => ("network-transmit-receive-symbolic", "tint-magenta"),
+        Kind::Telnet => ("network-wired-symbolic", "tint-red"),
+        Kind::Mosh => ("network-wireless-symbolic", "tint-cyan"),
     }
 }
 
@@ -231,10 +237,30 @@ pub fn filter(nodes: &[Node], query: &str) -> Vec<Node> {
 pub enum Quick {
     Ssh { args: Vec<String>, target: String },
     Serial { device: String, baud: Option<u32> },
+    Net { host: String, port: u16, telnet: bool },
+    Mosh(String),
 }
 
-/// Parses quick connect input: `[user@]host[:port]`, `ssh <args>` or
-/// `/dev/<port>[@baud]`.
+/// "host[:port]" or "[v6]:port"; `default` when no port is given.
+fn host_port(s: &str, default: Option<u16>) -> Option<(String, u16)> {
+    if let Some(rest) = s.strip_prefix('[') {
+        let (h, tail) = rest.split_once(']')?;
+        let port = match tail.strip_prefix(':') {
+            Some(p) => p.parse().ok()?,
+            None if tail.is_empty() => default?,
+            None => return None,
+        };
+        return Some((h.to_string(), port));
+    }
+    match s.rsplit_once(':') {
+        Some((h, p)) if !h.contains(':') => Some((h.to_string(), p.parse().ok().filter(|p| *p > 0)?)),
+        _ => Some((s.to_string(), default?)),
+    }
+}
+
+/// Parses quick connect input: `[user@]host[:port]`, `ssh <args>`,
+/// `/dev/<port>[@baud]`, `telnet://host[:port]`, `tcp://host:port`,
+/// `mosh [user@]host`.
 pub fn quick(input: &str) -> Option<Quick> {
     let s = input.trim();
     if s.is_empty() {
@@ -246,6 +272,22 @@ pub fn quick(input: &str) -> Option<Quick> {
             None => (s, None),
         };
         return Some(Quick::Serial { device: device.to_string(), baud });
+    }
+    for (scheme, telnet, default) in [("telnet://", true, Some(23)), ("tcp://", false, None)] {
+        if let Some(rest) = s.strip_prefix(scheme) {
+            let (host, port) = host_port(rest.trim_end_matches('/'), default)?;
+            if host.is_empty() || host.contains(char::is_whitespace) {
+                return None;
+            }
+            return Some(Quick::Net { host, port, telnet });
+        }
+    }
+    if let Some(rest) = s.strip_prefix("mosh ") {
+        let target = rest.trim();
+        if target.is_empty() || target.starts_with('-') || target.contains(char::is_whitespace) {
+            return None;
+        }
+        return Some(Quick::Mosh(target.to_string()));
     }
     if let Some(rest) = s.strip_prefix("ssh ") {
         let args: Vec<String> = rest.split_whitespace().map(str::to_string).collect();
@@ -299,6 +341,21 @@ mod tests {
             Some(Quick::Serial { device: "/dev/ttyS4".into(), baud: Some(921_600) })
         );
         assert_eq!(quick("/dev/ttyS4@fast"), None);
+        assert_eq!(
+            quick("telnet://router"),
+            Some(Quick::Net { host: "router".into(), port: 23, telnet: true })
+        );
+        assert_eq!(
+            quick("tcp://127.0.0.1:5760"),
+            Some(Quick::Net { host: "127.0.0.1".into(), port: 5760, telnet: false })
+        );
+        assert_eq!(
+            quick("tcp://[::1]:14550"),
+            Some(Quick::Net { host: "::1".into(), port: 14550, telnet: false })
+        );
+        assert_eq!(quick("tcp://host"), None);
+        assert_eq!(quick("mosh yk@box"), Some(Quick::Mosh("yk@box".into())));
+        assert_eq!(quick("mosh -x"), None);
         assert_eq!(quick("-oProxyCommand=x"), None);
         assert_eq!(quick("   "), None);
     }

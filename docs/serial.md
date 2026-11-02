@@ -11,19 +11,11 @@ The editor's **Device** field has a drop-down of detected ports with their
 USB name and VID:PID (e.g. `ttyUSB0 · FT232R USB UART (0403:6001)`).
 **Baud Rate** accepts any value; the drop-down lists common ones.
 
-## Pane toolbar
+## Pane, views and sending
 
-`device  115200 8N1  ● connected │ Hex │ Echo │ CR ▾ │ DTR │ RTS │ Break │ ⟳ │ ⌫`
-
-| Control | Effect |
-|---|---|
-| Hex | Incoming bytes as hex, 16 per line |
-| Echo | Show typed text locally |
-| CR / LF / CRLF | Bytes sent for Enter |
-| DTR, RTS | Line levels (both asserted on open) |
-| Break | 250 ms break |
-| ⟳ | Close and reopen the port |
-| ⌫ | Clear screen and scrollback |
+The serial pane is a stream pane: toolbar, Text/Hex/MAVLink views and the
+send bar are described in [streams.md](streams.md). Serial adds DTR, RTS
+and a 250 ms Break to the toolbar.
 
 ## Locking
 
@@ -69,7 +61,8 @@ stop_bits = 1          # 1 or 2
 flow = "none"          # none, software, hardware
 eol = "cr"             # cr, lf, crlf
 echo = false
-hex = false
+hex = false            # start in hex view
+mavlink = false        # start in MAVLink view
 reconnect = true
 ```
 

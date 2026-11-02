@@ -8,9 +8,8 @@ use std::path::PathBuf;
 use gtk::glib;
 use serde::{Deserialize, Serialize};
 
-use crate::serial::SerialCfg;
 use crate::store;
-use crate::term::{Kind, Launch};
+use crate::term::{Kind, Launch, Stream};
 
 const MAX: usize = 10;
 
@@ -23,29 +22,43 @@ pub struct Recent {
     pub ssh: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dir: Option<String>,
+    /// mosh arguments (without the program).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub serial: Option<SerialCfg>,
+    pub mosh: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<Stream>,
 }
 
 impl Recent {
     pub fn of(l: &Launch) -> Self {
-        let ssh = (l.kind == Kind::Ssh).then(|| l.argv.iter().skip(1).cloned().collect());
-        Self { title: l.title.clone(), target: l.target.clone(), ssh, dir: l.dir.clone(), serial: l.serial.clone() }
+        let args = || l.argv.iter().skip(1).cloned().collect();
+        Self {
+            title: l.title.clone(),
+            target: l.target.clone(),
+            ssh: (l.kind == Kind::Ssh).then(args),
+            mosh: (l.kind == Kind::Mosh).then(args),
+            dir: l.dir.clone(),
+            stream: l.stream.clone(),
+        }
     }
 
     /// Rebuilt launch. The program is always ssh or the user shell.
     pub fn launch(&self) -> Launch {
-        let mut l = match (&self.ssh, &self.serial) {
-            (Some(args), _) => Launch::ssh(args.clone(), &self.target),
-            (None, Some(cfg)) => Launch::serial(cfg.clone()),
-            (None, None) => Launch::shell(self.dir.clone()),
+        let mut l = if let Some(args) = &self.ssh {
+            Launch::ssh(args.clone(), &self.target)
+        } else if let Some(args) = &self.mosh {
+            Launch::mosh(args.clone(), &self.target)
+        } else if let Some(s) = &self.stream {
+            Launch::stream(s.clone())
+        } else {
+            Launch::shell(self.dir.clone())
         };
         l.title = self.title.clone();
         l
     }
 
     fn same(&self, o: &Recent) -> bool {
-        self.ssh == o.ssh && self.dir == o.dir && self.title == o.title && self.serial == o.serial
+        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream
     }
 }
 
@@ -116,5 +129,20 @@ mod tests {
         let back = Recent::of(&l).launch();
         assert_eq!(back.argv, l.argv);
         assert_eq!(back.title, "Board");
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    #[test]
+    fn stream_entry_roundtrip() {
+        let text = r#"[{"title":"SITL","target":"127.0.0.1:15760","stream":{"tcp":{"host":"127.0.0.1","port":15760,"mavlink":true}}}]"#;
+        let list: Vec<Recent> = serde_json::from_str(text).expect("parse");
+        let l = list[0].launch();
+        assert_eq!(l.kind, Kind::Tcp);
+        assert_eq!(l.title, "SITL");
+        assert_eq!(l.stream.as_ref().map(|s| s.opts().mavlink), Some(true));
     }
 }

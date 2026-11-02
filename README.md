@@ -8,8 +8,9 @@ Specification: [docs/SPEC.md](docs/SPEC.md).
 Milestone 1 plus the UI shell:
 
 - Activity bar, side panel with session tree (local shell + hosts from `~/.ssh/config`)
-- Quick connect bar (`user@host:port`, `ssh <args>`, `/dev/ttyUSB0@115200`)
-- Serial ports with toolbar, hex view, locking, mirror and auto-reconnect
+- Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`)
+- Serial, raw TCP and telnet panes: Text / Hex / MAVLink views, ASCII and hex send bar
+- Serial locking, mirror and auto-reconnect
 - Tabs with nested split panes, start page when no tab is open
 - Bottom dock and status bar
 - Live theme switching
@@ -29,6 +30,8 @@ Dependencies (Arch):
 ```sh
 sudo pacman -S gtk4 libadwaita vte4 libsecret base-devel
 ```
+
+Optional on both: `mosh` for mosh sessions.
 
 Rust 1.92 or newer (via rustup), then:
 
@@ -60,6 +63,7 @@ Drag a tab out of the tab bar to open it in a new window.
 An SSH pane stays open when the session ends; press Enter to reconnect.
 SSH prompts, connection sharing and the keyring: [docs/ssh.md](docs/ssh.md).
 Serial ports, locking, mirror and reconnect: [docs/serial.md](docs/serial.md).
+TCP, telnet, hex and MAVLink views, send bar: [docs/streams.md](docs/streams.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files

@@ -2,13 +2,13 @@
 
 use gtk::prelude::*;
 
-/// icon, tint, label, action, target (for win.soon).
+/// icon, tint, label, action, action target.
 const CARDS: &[(&str, &str, &str, &str, Option<&str>)] = &[
     ("utilities-terminal-symbolic", "tint-blue", "Local Shell", "win.new-tab", None),
     ("network-server-symbolic", "tint-green", "SSH", "win.quick-connect", None),
-    ("media-removable-symbolic", "tint-yellow", "Serial", "win.new-serial", None),
-    ("network-wired-symbolic", "tint-red", "Telnet", "win.soon", Some("Telnet arrives in milestone 6")),
-    ("network-transmit-receive-symbolic", "tint-magenta", "Raw TCP", "win.soon", Some("Raw TCP arrives in milestone 6")),
+    ("media-removable-symbolic", "tint-yellow", "Serial", "win.new-session", Some("serial")),
+    ("network-wired-symbolic", "tint-red", "Telnet", "win.new-session", Some("telnet")),
+    ("network-transmit-receive-symbolic", "tint-magenta", "Raw TCP", "win.new-session", Some("tcp")),
     ("folder-symbolic", "tint-cyan", "FTP", "win.soon", Some("FTP arrives in milestone 7")),
 ];
 

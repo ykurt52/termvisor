@@ -1,4 +1,4 @@
-// Serial port core: settings, port list, UUCP locks, I/O threads, hex view.
+// Serial port core: settings, port list, UUCP locks, I/O threads.
 //
 // Each open port runs a reader and a writer thread. The GTK side talks to
 // them through channels only, so a stuck port never blocks the UI.
@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serialport::SerialPort;
+
+use crate::link::{Event, StreamOpts};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,36 +34,6 @@ pub enum Flow {
     Hardware,
 }
 
-/// Bytes sent for Enter.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Eol {
-    #[default]
-    Cr,
-    Lf,
-    Crlf,
-}
-
-impl Eol {
-    pub const ALL: [Eol; 3] = [Eol::Cr, Eol::Lf, Eol::Crlf];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Eol::Cr => "CR",
-            Eol::Lf => "LF",
-            Eol::Crlf => "CRLF",
-        }
-    }
-
-    fn bytes(self) -> &'static [u8] {
-        match self {
-            Eol::Cr => b"\r",
-            Eol::Lf => b"\n",
-            Eol::Crlf => b"\r\n",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SerialCfg {
@@ -71,10 +43,8 @@ pub struct SerialCfg {
     pub parity: Parity,
     pub stop_bits: u8,
     pub flow: Flow,
-    pub eol: Eol,
-    pub echo: bool,
-    pub hex: bool,
-    pub reconnect: bool,
+    #[serde(flatten)]
+    pub opts: StreamOpts,
 }
 
 impl Default for SerialCfg {
@@ -86,10 +56,7 @@ impl Default for SerialCfg {
             parity: Parity::None,
             stop_bits: 1,
             flow: Flow::None,
-            eol: Eol::Cr,
-            echo: false,
-            hex: false,
-            reconnect: true,
+            opts: StreamOpts::default(),
         }
     }
 }
@@ -119,49 +86,6 @@ impl SerialCfg {
             return Err("stop bits must be 1 or 2".into());
         }
         Ok(())
-    }
-}
-
-/// Maps typed text to wire bytes: Enter (CR) becomes the configured EOL.
-pub fn outgoing(text: &str, eol: Eol) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len() + 1);
-    for b in text.bytes() {
-        if b == b'\r' {
-            out.extend_from_slice(eol.bytes());
-        } else {
-            out.push(b);
-        }
-    }
-    out
-}
-
-/// Local echo text: CR shown as a new line.
-pub fn echo(text: &str) -> String {
-    text.replace('\r', "\r\n")
-}
-
-/// Hex dump formatter, 16 bytes per line, keeps the column across chunks.
-#[derive(Default)]
-pub struct Hex {
-    col: usize,
-}
-
-impl Hex {
-    pub fn feed(&mut self, data: &[u8]) -> String {
-        let mut s = String::with_capacity(data.len() * 3 + 4);
-        for b in data {
-            s.push_str(&format!("{b:02X} "));
-            self.col += 1;
-            if self.col == 16 {
-                s.push_str("\r\n");
-                self.col = 0;
-            }
-        }
-        s
-    }
-
-    pub fn reset(&mut self) {
-        self.col = 0;
     }
 }
 
@@ -317,11 +241,6 @@ fn explain(cfg: &SerialCfg, e: &serialport::Error) -> String {
     }
 }
 
-pub enum Event {
-    Data(Vec<u8>),
-    Closed(String),
-}
-
 enum Cmd {
     Write(Vec<u8>),
     Break,
@@ -474,24 +393,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eol_mapping() {
-        assert_eq!(outgoing("ls\r", Eol::Cr), b"ls\r");
-        assert_eq!(outgoing("ls\r", Eol::Lf), b"ls\n");
-        assert_eq!(outgoing("ls\r", Eol::Crlf), b"ls\r\n");
-        assert_eq!(echo("a\rb"), "a\r\nb");
-    }
-
-    #[test]
-    fn hex_wraps_across_chunks() {
-        let mut h = Hex::default();
-        let a = h.feed(&[0u8; 10]);
-        let b = h.feed(&[0xAB; 10]);
-        assert!(!a.contains('\n'));
-        assert_eq!(b.matches("\r\n").count(), 1);
-        assert!(b.starts_with("AB AB AB AB AB AB \r\n"));
-    }
-
-    #[test]
     fn summary_and_check() {
         let mut c = SerialCfg { device: "/dev/ttyUSB0".into(), ..Default::default() };
         assert_eq!(c.summary(), "115200 8N1");
@@ -541,12 +442,13 @@ mod tests {
         while got.len() < 5 {
             match rx.recv_blocking().expect("event") {
                 Event::Data(d) => got.extend(d),
+                Event::Up(_) => {}
                 Event::Closed(e) => panic!("closed: {e}"),
             }
         }
         assert_eq!(got, b"hello");
 
-        conn.write(outgoing("ls\r", Eol::Crlf));
+        conn.write(crate::link::outgoing("ls\r", crate::link::Eol::Crlf));
         master.set_timeout(Duration::from_secs(2)).expect("timeout");
         let mut buf = [0u8; 4];
         master.read_exact(&mut buf).expect("master read");
@@ -562,9 +464,11 @@ mod tests {
 
     #[test]
     fn cfg_toml_roundtrip() {
-        let c = SerialCfg { device: "/dev/ttyS4".into(), parity: Parity::Even, eol: Eol::Crlf, ..Default::default() };
+        let opts = StreamOpts { eol: crate::link::Eol::Crlf, mavlink: true, ..Default::default() };
+        let c = SerialCfg { device: "/dev/ttyS4".into(), parity: Parity::Even, opts, ..Default::default() };
         let text = toml::to_string(&c).expect("ser");
         assert!(text.contains("parity = \"even\""));
+        assert!(text.contains("eol = \"crlf\""));
         assert_eq!(toml::from_str::<SerialCfg>(&text).expect("de"), c);
     }
 }

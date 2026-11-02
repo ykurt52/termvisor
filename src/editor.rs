@@ -6,13 +6,15 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::gio;
 
-use crate::serial::{self, Eol, Flow, Parity, SerialCfg};
+use crate::link::{Eol, StreamOpts, View};
+use crate::net::NetCfg;
+use crate::serial::{self, Flow, Parity, SerialCfg};
 use crate::state::State;
 use crate::store::{self, Entry, Folder, Shell, Ssh, SshOpts};
 
 const COLORS: &[&str] = &["Default", "Blue", "Green", "Yellow", "Red", "Magenta", "Cyan"];
 const TRISTATE: &[&str] = &["Inherit", "On", "Off"];
-const KINDS: &[&str] = &["SSH", "Shell", "Serial"];
+const KINDS: &[&str] = &["SSH", "Shell", "Serial", "Telnet", "Raw TCP", "Mosh"];
 const BAUDS: &[u32] = &[
     1200, 2400, 4800, 9600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600, 1_000_000, 1_500_000,
     2_000_000, 3_000_000,
@@ -35,6 +37,9 @@ enum Kind {
     Ssh,
     Shell,
     Serial,
+    Telnet,
+    Tcp,
+    Mosh,
     Folder,
 }
 
@@ -117,10 +122,89 @@ struct SerialRows {
     parity: adw::ComboRow,
     stop: adw::ComboRow,
     flow: adw::ComboRow,
+}
+
+/// Input and display rows shared by serial, telnet and raw TCP.
+#[derive(Clone)]
+struct StreamRows {
+    group: adw::PreferencesGroup,
     eol: adw::ComboRow,
     echo: adw::SwitchRow,
-    hex: adw::SwitchRow,
+    view: adw::ComboRow,
     reconnect: adw::SwitchRow,
+}
+
+impl StreamRows {
+    fn new() -> Self {
+        let eols: Vec<&str> = Eol::ALL.iter().map(|e| e.label()).collect();
+        let views: Vec<&str> = View::ALL.iter().map(|v| v.label()).collect();
+        let rows = Self {
+            group: adw::PreferencesGroup::new(),
+            eol: combo("Enter Sends", &eols),
+            echo: switch("Local Echo", "Show typed text locally"),
+            view: combo("Start View", &views),
+            reconnect: switch("Auto Reconnect", "Reconnect when the device or host comes back"),
+        };
+        rows.group.set_title("Input and Display");
+        rows.group.add(&rows.eol);
+        rows.group.add(&rows.echo);
+        rows.group.add(&rows.view);
+        rows.group.add(&rows.reconnect);
+        rows
+    }
+
+    fn set(&self, o: &StreamOpts) {
+        self.eol.set_selected(Eol::ALL.iter().position(|e| *e == o.eol).unwrap_or(0) as u32);
+        self.echo.set_active(o.echo);
+        self.view.set_selected(View::ALL.iter().position(|v| *v == o.view()).unwrap_or(0) as u32);
+        self.reconnect.set_active(o.reconnect);
+    }
+
+    fn get(&self) -> StreamOpts {
+        let view = View::ALL.get(self.view.selected() as usize).copied().unwrap_or_default();
+        StreamOpts {
+            eol: Eol::ALL.get(self.eol.selected() as usize).copied().unwrap_or_default(),
+            echo: self.echo.is_active(),
+            hex: view == View::Hex,
+            mavlink: view == View::Mavlink,
+            reconnect: self.reconnect.is_active(),
+        }
+    }
+}
+
+/// Host and port rows for telnet and raw TCP.
+#[derive(Clone)]
+struct NetRows {
+    group: adw::PreferencesGroup,
+    host: adw::EntryRow,
+    port: adw::EntryRow,
+}
+
+impl NetRows {
+    fn new() -> Self {
+        let rows = Self { group: adw::PreferencesGroup::new(), host: entry_row("Host"), port: entry_row("Port") };
+        rows.group.set_title("Network");
+        rows.port.set_input_purpose(gtk::InputPurpose::Digits);
+        rows.group.add(&rows.host);
+        rows.group.add(&rows.port);
+        rows
+    }
+
+    fn set(&self, c: &NetCfg) {
+        self.host.set_text(&c.host);
+        self.port.set_text(&c.port.to_string());
+    }
+
+    fn get(&self, opts: StreamOpts) -> Result<NetCfg, String> {
+        let host = text(&self.host).ok_or("Host is required")?;
+        let port = text(&self.port)
+            .and_then(|p| p.parse::<u16>().ok())
+            .filter(|p| *p > 0)
+            .ok_or("Port must be 1-65535")?;
+        let c = NetCfg { host, port, opts };
+        c.check()?;
+        Ok(c)
+    }
 }
 
 fn switch(title: &str, sub: &str) -> adw::SwitchRow {
@@ -132,7 +216,6 @@ fn switch(title: &str, sub: &str) -> adw::SwitchRow {
 
 impl SerialRows {
     fn new() -> Self {
-        let eols: Vec<&str> = Eol::ALL.iter().map(|e| e.label()).collect();
         let rows = Self {
             group: adw::PreferencesGroup::new(),
             device: entry_row("Device"),
@@ -141,10 +224,6 @@ impl SerialRows {
             parity: combo("Parity", PARITY),
             stop: combo("Stop Bits", STOP_BITS),
             flow: combo("Flow Control", FLOW),
-            eol: combo("Enter Sends", &eols),
-            echo: switch("Local Echo", "Show typed text locally"),
-            hex: switch("Hex View", "Start with incoming bytes shown as hex"),
-            reconnect: switch("Auto Reconnect", "Reopen the port when the device comes back"),
         };
         rows.group.set_title("Serial Port");
         rows.baud.set_input_purpose(gtk::InputPurpose::Digits);
@@ -161,10 +240,6 @@ impl SerialRows {
             rows.parity.upcast_ref(),
             rows.stop.upcast_ref(),
             rows.flow.upcast_ref(),
-            rows.eol.upcast_ref(),
-            rows.echo.upcast_ref(),
-            rows.hex.upcast_ref(),
-            rows.reconnect.upcast_ref(),
         ] {
             rows.group.add(r);
         }
@@ -186,13 +261,9 @@ impl SerialRows {
             Flow::Software => 1,
             Flow::Hardware => 2,
         });
-        self.eol.set_selected(Eol::ALL.iter().position(|e| *e == c.eol).unwrap_or(0) as u32);
-        self.echo.set_active(c.echo);
-        self.hex.set_active(c.hex);
-        self.reconnect.set_active(c.reconnect);
     }
 
-    fn get(&self) -> Result<SerialCfg, String> {
+    fn get(&self, opts: StreamOpts) -> Result<SerialCfg, String> {
         let device = text(&self.device).ok_or("Device is required")?;
         let baud = text(&self.baud)
             .and_then(|b| b.parse::<u32>().ok())
@@ -213,10 +284,7 @@ impl SerialRows {
                 2 => Flow::Hardware,
                 _ => Flow::None,
             },
-            eol: Eol::ALL.get(self.eol.selected() as usize).copied().unwrap_or_default(),
-            echo: self.echo.is_active(),
-            hex: self.hex.is_active(),
-            reconnect: self.reconnect.is_active(),
+            opts,
         };
         c.check()?;
         Ok(c)
@@ -331,6 +399,8 @@ struct Form {
     shell: adw::PreferencesGroup,
     dir: adw::EntryRow,
     serial: SerialRows,
+    net: NetRows,
+    stream: StreamRows,
     folder: bool,
 }
 
@@ -342,6 +412,9 @@ impl Form {
             match self.kind.selected() {
                 1 => Kind::Shell,
                 2 => Kind::Serial,
+                3 => Kind::Telnet,
+                4 => Kind::Tcp,
+                5 => Kind::Mosh,
                 _ => Kind::Ssh,
             }
         }
@@ -349,13 +422,20 @@ impl Form {
 
     fn sync(&self) {
         let k = self.kind();
-        self.host.set_visible(k == Kind::Ssh);
-        self.conn.set_visible(k == Kind::Ssh || k == Kind::Folder);
+        let ssh_like = k == Kind::Ssh || k == Kind::Mosh;
+        let net = k == Kind::Telnet || k == Kind::Tcp;
+        self.host.set_visible(ssh_like);
+        self.conn.set_visible(ssh_like || k == Kind::Folder);
         self.serial.group.set_visible(k == Kind::Serial);
+        self.net.group.set_visible(net);
+        self.stream.group.set_visible(net || k == Kind::Serial);
+        if k == Kind::Telnet && self.net.port.text().is_empty() {
+            self.net.port.set_text("23");
+        }
         self.conn.set_title(if k == Kind::Folder { "Defaults for Sessions Inside" } else { "Connection" });
         self.shell.set_visible(k == Kind::Shell);
         self.favorite.set_visible(k != Kind::Folder);
-        self.remember.set_visible(k == Kind::Ssh);
+        self.remember.set_visible(ssh_like);
     }
 
     fn load(&self, e: &Entry) {
@@ -367,11 +447,16 @@ impl Form {
         self.color.set_selected(color as u32);
         self.favorite.set_active(e.favorite());
         match e {
-            Entry::Ssh(s) => {
-                self.kind.set_selected(0);
+            Entry::Ssh(s) | Entry::Mosh(s) => {
+                self.kind.set_selected(if matches!(e, Entry::Mosh(_)) { 5 } else { 0 });
                 self.host.set_text(&s.host);
                 self.opts.set(&s.opts);
                 self.remember.set_active(!s.no_store);
+            }
+            Entry::Telnet(n) | Entry::Tcp(n) => {
+                self.kind.set_selected(if matches!(e, Entry::Telnet(_)) { 3 } else { 4 });
+                self.net.set(&n.cfg);
+                self.stream.set(&n.cfg.opts);
             }
             Entry::Shell(s) => {
                 self.kind.set_selected(1);
@@ -380,6 +465,7 @@ impl Form {
             Entry::Serial(s) => {
                 self.kind.set_selected(2);
                 self.serial.set(&s.cfg);
+                self.stream.set(&s.cfg.opts);
             }
             Entry::Folder(f) => self.opts.set(&f.defaults),
         }
@@ -392,17 +478,26 @@ impl Form {
             i => COLORS.get(i).map(|c| c.to_lowercase()),
         };
         let favorite = self.favorite.is_active();
-        let e = match self.kind() {
-            Kind::Ssh => Entry::Ssh(Ssh {
+        let ssh = |name: String, color: Option<String>| -> Result<Ssh, String> {
+            Ok(Ssh {
                 name,
                 host: text(&self.host).ok_or("Host is required")?,
                 opts: self.opts.get()?,
                 color,
                 favorite,
                 no_store: !self.remember.is_active(),
-            }),
+            })
+        };
+        let net = |name: String, color: Option<String>| -> Result<store::Net, String> {
+            Ok(store::Net { name, cfg: self.net.get(self.stream.get())?, color, favorite })
+        };
+        let e = match self.kind() {
+            Kind::Ssh => Entry::Ssh(ssh(name, color)?),
+            Kind::Mosh => Entry::Mosh(ssh(name, color)?),
+            Kind::Telnet => Entry::Telnet(net(name, color)?),
+            Kind::Tcp => Entry::Tcp(net(name, color)?),
             Kind::Shell => Entry::Shell(Shell { name, dir: text(&self.dir), color, favorite }),
-            Kind::Serial => Entry::Serial(store::Serial { name, cfg: self.serial.get()?, color, favorite }),
+            Kind::Serial => Entry::Serial(store::Serial { name, cfg: self.serial.get(self.stream.get())?, color, favorite }),
             Kind::Folder => Entry::Folder(Folder {
                 name,
                 color,
@@ -442,6 +537,8 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
         shell: adw::PreferencesGroup::new(),
         dir: entry_row("Working Directory"),
         serial: SerialRows::new(),
+        net: NetRows::new(),
+        stream: StreamRows::new(),
         folder,
     };
     form.conn.add(&form.host);
@@ -467,8 +564,11 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     page.add(&form.conn);
     page.add(&form.shell);
     page.add(&form.serial.group);
+    page.add(&form.net.group);
+    page.add(&form.stream.group);
 
     form.serial.set(&default_serial());
+    form.stream.set(&StreamOpts::default());
     form.load(&init);
     form.sync();
     let f = form.clone();
@@ -526,6 +626,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     let mut texts = vec![&form.name, &form.host, &form.dir];
     texts.extend(form.opts.texts());
     texts.extend(form.serial.texts());
+    texts.extend([&form.net.host, &form.net.port]);
     for r in texts {
         let s = submit.clone();
         r.connect_entry_activated(move |_| s());

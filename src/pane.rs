@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use vte::prelude::*;
 
-use crate::serialpane;
+use crate::streampane;
 use crate::state::State;
 use crate::term::{self, Kind, Launch};
 
@@ -113,8 +113,8 @@ fn leaf_of(term: &vte::Terminal) -> Option<gtk::Widget> {
 /// Creates a pane for `launch`. Returns the terminal and the leaf widget
 /// to insert into the layout.
 pub fn open(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) {
-    let (t, leaf) = match &launch.serial {
-        Some(cfg) => serialpane::build(state, launch, cfg.clone()),
+    let (t, leaf) = match &launch.stream {
+        Some(s) => streampane::build(state, launch, s.clone()),
         None => {
             let t = hooked(state, launch);
             let leaf = term::scroll(&t).upcast::<gtk::Widget>();

@@ -15,15 +15,17 @@ use crate::editor;
 use crate::palette;
 use crate::pane;
 use crate::recover;
-use crate::serialpane;
+use crate::streampane;
 use crate::recent::{self, Recent};
+use crate::link::Eol;
+use crate::net::NetCfg;
 use crate::serial::SerialCfg;
 use crate::sessions::{self, Quick};
 use crate::sidebar::{OpenFn, Sidebar};
 use crate::state::State;
 use crate::store::{self, Entry, Folder};
 use crate::status::Status;
-use crate::term::{self, Launch};
+use crate::term::{self, Launch, Stream};
 use crate::welcome;
 
 /// Keyboard shortcuts for window actions.
@@ -135,7 +137,7 @@ impl Ui {
     /// Confirms, then releases serial ports, shared SSH connections and
     /// optionally other instances. The slow part runs off the GUI thread.
     fn release(&self) {
-        let ports = serialpane::open_count();
+        let ports = streampane::open_count();
         let masters = recover::masters();
         let others = recover::instances();
         let mut lines = vec![
@@ -172,7 +174,7 @@ impl Ui {
             if resp != "release" {
                 return;
             }
-            let n = serialpane::release_all();
+            let n = streampane::release_all();
             let kill = stop_others.is_active();
             let u = u.clone();
             glib::spawn_future_local(async move {
@@ -198,10 +200,28 @@ impl Ui {
                 if let Some(b) = baud {
                     cfg.baud = b;
                 }
-                self.open(&Launch::serial(cfg), true);
+                self.open(&Launch::stream(Stream::Serial(cfg)), true);
                 self.quick.set_text("");
             }
-            None => self.toast("Use user@host[:port], ssh <args> or /dev/ttyX[@baud]"),
+            Some(Quick::Net { host, port, telnet }) => {
+                let mut cfg = NetCfg { host, port, ..Default::default() };
+                let s = if telnet {
+                    cfg.opts.eol = Eol::Crlf;
+                    Stream::Telnet(cfg)
+                } else {
+                    Stream::Tcp(cfg)
+                };
+                self.open(&Launch::stream(s), true);
+                self.quick.set_text("");
+            }
+            Some(Quick::Mosh(target)) => {
+                if !term::found("mosh") {
+                    return self.toast("mosh is not installed (package: mosh)");
+                }
+                self.open(&Launch::mosh(vec!["--".into(), target.clone()], &target), true);
+                self.quick.set_text("");
+            }
+            None => self.toast("Use user@host[:port], ssh <args>, mosh host, /dev/ttyX[@baud], telnet://host, tcp://host:port"),
         }
     }
 }
@@ -449,10 +469,25 @@ fn add_actions(ui: &Ui) {
         let items = sessions::flat(&sessions::base(&u.state.store.borrow().root));
         palette::open(&u.win, items, u.pick.clone());
     });
-    action(ui, "new-serial", None, |u, _| {
-        let cfg = editor::default_serial();
-        let name = cfg.device.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("Serial").to_string();
-        let init = Entry::Serial(store::Serial { name, cfg, ..Default::default() });
+    // New session editor preset to a type: "serial", "telnet" or "tcp".
+    action(ui, "new-session", Some(glib::VariantTy::STRING), |u, p| {
+        let init = match p.and_then(|v| v.get::<String>()).as_deref() {
+            Some("telnet") => {
+                let mut cfg = NetCfg::default();
+                cfg.opts.eol = Eol::Crlf;
+                Entry::Telnet(store::Net { name: "Telnet".into(), cfg, ..Default::default() })
+            }
+            Some("tcp") => Entry::Tcp(store::Net {
+                name: "TCP".into(),
+                cfg: NetCfg { port: 5760, ..Default::default() },
+                ..Default::default()
+            }),
+            _ => {
+                let cfg = editor::default_serial();
+                let name = cfg.device.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("Serial").to_string();
+                Entry::Serial(store::Serial { name, cfg, ..Default::default() })
+            }
+        };
         editor::open(&u.win, &u.state, editor::Mode::New(Vec::new()), init);
     });
     action(ui, "release-all", None, |u, _| u.release());
