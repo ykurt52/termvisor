@@ -39,6 +39,7 @@
 .act-macros { color: @c_red; }
 .act-tools { color: @c_magenta; }
 .act-android { color: @c_green; }
+.act-usb { color: @c_cyan; }
 
 .act-sessions.active { background-color: alpha(@c_blue, 0.18); box-shadow: inset 3px 0 0 @c_blue; }
 .act-files.active { background-color: alpha(@c_yellow, 0.18); box-shadow: inset 3px 0 0 @c_yellow; }
@@ -46,6 +47,7 @@
 .act-macros.active { background-color: alpha(@c_red, 0.18); box-shadow: inset 3px 0 0 @c_red; }
 .act-tools.active { background-color: alpha(@c_magenta, 0.18); box-shadow: inset 3px 0 0 @c_magenta; }
 .act-android.active { background-color: alpha(@c_green, 0.18); box-shadow: inset 3px 0 0 @c_green; }
+.act-usb.active { background-color: alpha(@c_cyan, 0.18); box-shadow: inset 3px 0 0 @c_cyan; }
 
 /* Side panel */
 .sidebar {

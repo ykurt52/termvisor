@@ -9,6 +9,7 @@ use gtk::{gio, glib};
 use crate::devices;
 use crate::macropage;
 use crate::tunnelpage;
+use crate::usbpage;
 use crate::editor::{self, Mode};
 use crate::files::Files;
 use crate::sessions::{self, Node, NodeKind};
@@ -25,6 +26,7 @@ const PAGES: &[(&str, &str, &str, Option<&str>)] = &[
     ("sessions", "network-server-symbolic", "Sessions", None),
     ("files", "folder-symbolic", "Files", None),
     ("android", "phone-symbolic", "Android", None),
+    ("usb", "drive-removable-media-symbolic", "USB", None),
     ("tunnels", "network-transmit-receive-symbolic", "Tunnels", None),
     ("macros", "media-record-symbolic", "Macros", None),
     ("tools", "applications-utilities-symbolic", "Tools", Some("TFTP, HTTP server, port scanner, ping. Planned for milestone 11.")),
@@ -56,6 +58,7 @@ impl Sidebar {
             let page = match note {
                 None if id == "files" => files.widget.clone().upcast::<gtk::Widget>(),
                 None if id == "android" => devices::page(open.clone()).upcast::<gtk::Widget>(),
+                None if id == "usb" => usbpage::page(open.clone()).upcast::<gtk::Widget>(),
                 None if id == "macros" => macros.widget.clone().upcast::<gtk::Widget>(),
                 None if id == "tunnels" => tunnelpage::page(state).upcast::<gtk::Widget>(),
                 None => sessions_page(state, open.clone()).upcast::<gtk::Widget>(),

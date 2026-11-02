@@ -40,6 +40,10 @@ mod store;
 mod term;
 mod theme;
 mod transfers;
+mod usb;
+mod usbdecode;
+mod usbpage;
+mod usbpane;
 mod tunnelpage;
 mod tunnels;
 mod watchdog;
@@ -68,6 +72,15 @@ fn main() -> glib::ExitCode {
         return askpass::run(&args[1]);
     }
     match args.get(1).map(String::as_str) {
+        Some("--usbmon-setup") => {
+            return match usb::setup_system() {
+                Ok(()) => glib::ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("termvisor: {e}");
+                    glib::ExitCode::FAILURE
+                }
+            };
+        }
         Some("--release-all") => return glib::ExitCode::from(u8::try_from(recover::cli()).unwrap_or(1)),
         Some(watchdog::FLAG) => {
             return match args.get(2).and_then(|p| p.parse::<u32>().ok()) {

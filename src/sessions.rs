@@ -135,6 +135,7 @@ fn kind_look(k: Kind) -> (&'static str, &'static str) {
         Kind::Ftp => ("folder-remote-symbolic", "tint-blue"),
         Kind::Adb => ("phone-symbolic", "tint-green"),
         Kind::Logcat => ("view-list-symbolic", "tint-yellow"),
+        Kind::Usb => ("drive-removable-media-symbolic", "tint-magenta"),
     }
 }
 

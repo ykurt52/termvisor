@@ -32,6 +32,8 @@ pub enum Kind {
     Adb,
     /// Device log view of an Android device.
     Logcat,
+    /// USB traffic capture.
+    Usb,
 }
 
 impl Kind {
@@ -46,6 +48,7 @@ impl Kind {
             Kind::Ftp => "FTP",
             Kind::Adb => "ADB",
             Kind::Logcat => "Logcat",
+            Kind::Usb => "USB",
         }
     }
 
@@ -60,6 +63,7 @@ impl Kind {
             Kind::Ftp => "folder-remote-symbolic",
             Kind::Adb => "phone-symbolic",
             Kind::Logcat => "view-list-symbolic",
+            Kind::Usb => "drive-removable-media-symbolic",
         }
     }
 }
@@ -121,6 +125,25 @@ pub struct Launch {
     pub ftp: Option<FtpCfg>,
     /// Android device (shell or logcat).
     pub adb: Option<AdbLaunch>,
+    /// USB capture.
+    pub usb: Option<UsbLaunch>,
+}
+
+/// What a USB capture tab shows.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UsbLaunch {
+    /// usbmon bus; 0 is every bus.
+    pub bus: u16,
+    /// Only this device address on the bus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev: Option<u8>,
+    /// Start in the serial view.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub serial: bool,
+    /// A saved pcap file instead of a live capture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 impl Launch {
@@ -135,6 +158,7 @@ impl Launch {
             stream: None,
             ftp: None,
             adb: None,
+            usb: None,
         }
     }
 
@@ -152,6 +176,7 @@ impl Launch {
             stream: None,
             ftp: None,
             adb: None,
+            usb: None,
         }
     }
 
@@ -166,6 +191,7 @@ impl Launch {
             stream: None,
             ftp: Some(cfg),
             adb: None,
+            usb: None,
         }
     }
 
@@ -190,6 +216,27 @@ impl Launch {
             stream: None,
             ftp: None,
             adb: Some(AdbLaunch { serial: serial.to_string(), logcat }),
+            usb: None,
+        }
+    }
+
+    /// USB capture; `title` names the device or file.
+    pub fn usb(u: UsbLaunch, title: &str) -> Self {
+        Self {
+            kind: Kind::Usb,
+            argv: Vec::new(),
+            dir: None,
+            title: title.to_string(),
+            target: match (&u.file, u.dev) {
+                (Some(f), _) => f.clone(),
+                (None, Some(d)) => format!("usb:{}-{d}", u.bus),
+                (None, None) => format!("usb:{}", u.bus),
+            },
+            keyring: false,
+            stream: None,
+            ftp: None,
+            adb: None,
+            usb: Some(u),
         }
     }
 
@@ -204,6 +251,7 @@ impl Launch {
             stream: Some(s),
             ftp: None,
             adb: None,
+            usb: None,
         }
     }
 }
@@ -311,7 +359,7 @@ pub fn ssh_env(target: &str, keyring: bool) -> Vec<String> {
 /// Starts (or restarts) the child process of `term` on its own pty.
 pub fn run(term: &vte::Terminal, launch: &Launch) {
     // Stream and logcat panes have no child here; they feed the terminal.
-    if launch.stream.is_some() || launch.kind == Kind::Logcat {
+    if launch.stream.is_some() || matches!(launch.kind, Kind::Logcat | Kind::Usb) {
         return;
     }
     if launch.kind == Kind::Adb {

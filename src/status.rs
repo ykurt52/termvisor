@@ -49,6 +49,7 @@ impl Status {
                     Kind::Mosh => "kind-mosh",
                     Kind::Ftp => "kind-net",
                     Kind::Adb | Kind::Logcat => "kind-adb",
+                    Kind::Usb => "kind-net",
                 });
                 self.icon.set_icon_name(Some(l.kind.icon()));
                 self.icon.set_visible(true);

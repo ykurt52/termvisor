@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use vte::prelude::*;
 
-use crate::{logcat, multi, streampane};
+use crate::{logcat, multi, streampane, usbpane};
 use crate::state::State;
 use crate::term::{self, Kind, Launch};
 
@@ -116,6 +116,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) 
     let (t, leaf) = match &launch.stream {
         Some(s) => streampane::build(state, launch, s.clone()),
         None if launch.kind == Kind::Logcat => logcat::build(state, launch),
+        None if launch.kind == Kind::Usb => usbpane::build(state, launch),
         None => {
             let t = hooked(state, launch);
             let leaf = term::scroll(&t).upcast::<gtk::Widget>();

@@ -18,6 +18,7 @@ Milestone 1 plus the UI shell:
 - Timestamps, regex highlight rules and logging to file in every pane
 - Android: live device list, adb shell, logcat view with filters, device files
 - Multi-exec, macros with expect, SSH tunnels (-L/-R/-D) with reconnect
+- USB capture (usbmon): decoded transfers, serial view for USB serial adapters, pcap
 - Bottom dock and status bar
 - Live theme switching
 
@@ -97,6 +98,7 @@ Command buttons: [docs/commands.md](docs/commands.md).
 Timestamps, highlight, logging: [docs/output.md](docs/output.md).
 Android devices: [docs/adb.md](docs/adb.md).
 Multi-exec, macros, tunnels: [docs/multiexec.md](docs/multiexec.md), [docs/macros.md](docs/macros.md), [docs/tunnels.md](docs/tunnels.md).
+USB capture: [docs/usb.md](docs/usb.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files
