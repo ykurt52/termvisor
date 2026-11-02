@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use gtk::glib;
 use serde::{Deserialize, Serialize};
 
+use crate::adb::AdbLaunch;
 use crate::ftp::FtpCfg;
 use crate::store;
 use crate::term::{Kind, Launch, Stream};
@@ -30,6 +31,8 @@ pub struct Recent {
     pub stream: Option<Stream>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ftp: Option<FtpCfg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adb: Option<AdbLaunch>,
 }
 
 impl Recent {
@@ -43,6 +46,7 @@ impl Recent {
             dir: l.dir.clone(),
             stream: l.stream.clone(),
             ftp: l.ftp.clone(),
+            adb: l.adb.clone(),
         }
     }
 
@@ -56,6 +60,8 @@ impl Recent {
             Launch::stream(s.clone())
         } else if let Some(c) = &self.ftp {
             Launch::ftp(c.clone())
+        } else if let Some(a) = &self.adb {
+            Launch::adb(&a.serial, "", a.logcat)
         } else {
             Launch::shell(self.dir.clone())
         };
@@ -64,7 +70,7 @@ impl Recent {
     }
 
     fn same(&self, o: &Recent) -> bool {
-        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp
+        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp && self.adb == o.adb
     }
 }
 

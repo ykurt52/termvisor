@@ -38,12 +38,14 @@
 .act-tunnels { color: @c_green; }
 .act-macros { color: @c_red; }
 .act-tools { color: @c_magenta; }
+.act-android { color: @c_green; }
 
 .act-sessions.active { background-color: alpha(@c_blue, 0.18); box-shadow: inset 3px 0 0 @c_blue; }
 .act-files.active { background-color: alpha(@c_yellow, 0.18); box-shadow: inset 3px 0 0 @c_yellow; }
 .act-tunnels.active { background-color: alpha(@c_green, 0.18); box-shadow: inset 3px 0 0 @c_green; }
 .act-macros.active { background-color: alpha(@c_red, 0.18); box-shadow: inset 3px 0 0 @c_red; }
 .act-tools.active { background-color: alpha(@c_magenta, 0.18); box-shadow: inset 3px 0 0 @c_magenta; }
+.act-android.active { background-color: alpha(@c_green, 0.18); box-shadow: inset 3px 0 0 @c_green; }
 
 /* Side panel */
 .sidebar {
@@ -150,6 +152,11 @@ tabbar tab:selected {
 
 .statusbar.kind-mosh {
   background-image: linear-gradient(90deg, @c_cyan, @c_blue);
+  color: @window_bg_color;
+}
+
+.statusbar.kind-adb {
+  background-image: linear-gradient(90deg, @c_green, @c_yellow);
   color: @window_bg_color;
 }
 

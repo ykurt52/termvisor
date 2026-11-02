@@ -25,6 +25,8 @@ pub struct Node {
 }
 
 #[derive(Clone)]
+// Session trees are small; boxing every item is not worth it.
+#[allow(clippy::large_enum_variant)]
 pub enum NodeKind {
     Folder(Vec<Node>),
     Item(Result<Launch, String>),
@@ -131,6 +133,8 @@ fn kind_look(k: Kind) -> (&'static str, &'static str) {
         Kind::Telnet => ("network-wired-symbolic", "tint-red"),
         Kind::Mosh => ("network-wireless-symbolic", "tint-cyan"),
         Kind::Ftp => ("folder-remote-symbolic", "tint-blue"),
+        Kind::Adb => ("phone-symbolic", "tint-green"),
+        Kind::Logcat => ("view-list-symbolic", "tint-yellow"),
     }
 }
 
@@ -243,6 +247,8 @@ pub enum Quick {
     Net { host: String, port: u16, telnet: bool },
     Mosh(String),
     Ftp(FtpCfg),
+    /// adb://<serial>; empty serial: the only device.
+    Adb(String),
 }
 
 /// "host[:port]" or "[v6]:port"; `default` when no port is given.
@@ -298,6 +304,13 @@ pub fn quick(input: &str) -> Option<Quick> {
             return cfg.check().ok().map(|_| Quick::Ftp(cfg));
         }
     }
+    if let Some(rest) = s.strip_prefix("adb://") {
+        let serial = rest.trim_end_matches('/');
+        if serial.contains(char::is_whitespace) {
+            return None;
+        }
+        return Some(Quick::Adb(serial.to_string()));
+    }
     if let Some(rest) = s.strip_prefix("mosh ") {
         let target = rest.trim();
         if target.is_empty() || target.starts_with('-') || target.contains(char::is_whitespace) {
@@ -336,6 +349,13 @@ mod tests {
         let word = fuzzy("lab", "Lab / board").unwrap_or(i32::MIN);
         let scattered = fuzzy("lab", "local shell abc").unwrap_or(i32::MIN);
         assert!(word > scattered);
+    }
+
+    #[test]
+    fn quick_adb() {
+        assert!(matches!(quick("adb://R58M123"), Some(Quick::Adb(s)) if s == "R58M123"));
+        assert!(matches!(quick("adb://"), Some(Quick::Adb(s)) if s.is_empty()));
+        assert!(quick("adb://a b").is_none());
     }
 
     #[test]

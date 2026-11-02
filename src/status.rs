@@ -36,7 +36,7 @@ impl Status {
     }
 
     pub fn show(&self, launch: Option<&Launch>, theme: &str) {
-        for c in ["kind-shell", "kind-ssh", "kind-serial", "kind-net", "kind-mosh"] {
+        for c in ["kind-shell", "kind-ssh", "kind-serial", "kind-net", "kind-mosh", "kind-adb"] {
             self.bar.remove_css_class(c);
         }
         match launch {
@@ -48,6 +48,7 @@ impl Status {
                     Kind::Tcp | Kind::Telnet => "kind-net",
                     Kind::Mosh => "kind-mosh",
                     Kind::Ftp => "kind-net",
+                    Kind::Adb | Kind::Logcat => "kind-adb",
                 });
                 self.icon.set_icon_name(Some(l.kind.icon()));
                 self.icon.set_visible(true);

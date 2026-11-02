@@ -8,7 +8,7 @@ Specification: [docs/SPEC.md](docs/SPEC.md).
 Milestone 1 plus the UI shell:
 
 - Activity bar, side panel with session tree (local shell + hosts from `~/.ssh/config`)
-- Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`, `ftp://host`)
+- Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`, `ftp://host`, `adb://serial`)
 - Serial, raw TCP and telnet panes: Text / Hex / MAVLink views, ASCII and hex send bar
 - Serial locking, mirror and auto-reconnect
 - XMODEM, YMODEM and ZMODEM send/receive on serial, TCP and telnet; ZMODEM auto-start and resume
@@ -16,6 +16,7 @@ Milestone 1 plus the UI shell:
 - Tabs with nested split panes, start page when no tab is open
 - Command panel: pages of up to 50 buttons that send text or hex to the focused pane
 - Timestamps, regex highlight rules and logging to file in every pane
+- Android: live device list, adb shell, logcat view with filters, device files
 - Bottom dock and status bar
 - Live theme switching
 
@@ -92,6 +93,7 @@ TCP, telnet, hex and MAVLink views, send bar: [docs/streams.md](docs/streams.md)
 File browser and transfers: [docs/files.md](docs/files.md).
 Command buttons: [docs/commands.md](docs/commands.md).
 Timestamps, highlight, logging: [docs/output.md](docs/output.md).
+Android devices: [docs/adb.md](docs/adb.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files

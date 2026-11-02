@@ -3,6 +3,7 @@
 
 use std::io::{Read, Write};
 
+use crate::adb::Adb;
 use crate::ftp::{Ftp, FtpCfg};
 use crate::sftp::{self, Attrs, DirEntry, Progress, Sftp};
 use crate::term::SftpCmd;
@@ -90,6 +91,8 @@ pub enum Target {
     Sftp(SftpCmd),
     /// FTP/FTPS with the password already resolved.
     Ftp(FtpCfg, String),
+    /// Android device: adb binary and serial.
+    Adb(String, String),
 }
 
 impl Target {
@@ -98,6 +101,7 @@ impl Target {
         match self {
             Target::Sftp((argv, _)) => argv.join("\u{1f}"),
             Target::Ftp(c, _) => c.id(),
+            Target::Adb(_, serial) => format!("adb:{serial}"),
         }
     }
 
@@ -105,6 +109,7 @@ impl Target {
         match self {
             Target::Sftp((argv, env)) => Ok(Box::new(Sftp::spawn(argv, env)?)),
             Target::Ftp(c, pass) => Ok(Box::new(Ftp::open(c, pass)?)),
+            Target::Adb(bin, serial) => Ok(Box::new(Adb::new(bin, serial))),
         }
     }
 }

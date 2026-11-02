@@ -8,6 +8,7 @@ use std::rc::Rc;
 use gtk::{gio, glib, pango, prelude::*};
 use vte::prelude::*;
 
+use crate::adb::{self, AdbLaunch};
 use crate::askpass;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,10 @@ pub enum Kind {
     Telnet,
     Mosh,
     Ftp,
+    /// `adb shell` on an Android device.
+    Adb,
+    /// Device log view of an Android device.
+    Logcat,
 }
 
 impl Kind {
@@ -39,6 +44,8 @@ impl Kind {
             Kind::Telnet => "Telnet",
             Kind::Mosh => "Mosh",
             Kind::Ftp => "FTP",
+            Kind::Adb => "ADB",
+            Kind::Logcat => "Logcat",
         }
     }
 
@@ -51,6 +58,8 @@ impl Kind {
             Kind::Telnet => "network-wired-symbolic",
             Kind::Mosh => "network-wireless-symbolic",
             Kind::Ftp => "folder-remote-symbolic",
+            Kind::Adb => "phone-symbolic",
+            Kind::Logcat => "view-list-symbolic",
         }
     }
 }
@@ -110,6 +119,8 @@ pub struct Launch {
     pub stream: Option<Stream>,
     /// FTP server; opens in the Files panel instead of a tab.
     pub ftp: Option<FtpCfg>,
+    /// Android device (shell or logcat).
+    pub adb: Option<AdbLaunch>,
 }
 
 impl Launch {
@@ -123,6 +134,7 @@ impl Launch {
             keyring: false,
             stream: None,
             ftp: None,
+            adb: None,
         }
     }
 
@@ -139,6 +151,7 @@ impl Launch {
             keyring: true,
             stream: None,
             ftp: None,
+            adb: None,
         }
     }
 
@@ -152,6 +165,7 @@ impl Launch {
             keyring: true,
             stream: None,
             ftp: Some(cfg),
+            adb: None,
         }
     }
 
@@ -161,6 +175,22 @@ impl Launch {
         l.kind = Kind::Mosh;
         l.argv[0] = "mosh".into();
         l
+    }
+
+    /// `adb shell` on `serial` (empty: the only device); `name` is shown.
+    pub fn adb(serial: &str, name: &str, logcat: bool) -> Self {
+        let shown = if name.is_empty() { if serial.is_empty() { "Android" } else { serial } } else { name };
+        Self {
+            kind: if logcat { Kind::Logcat } else { Kind::Adb },
+            argv: Vec::new(),
+            dir: None,
+            title: if logcat { format!("logcat {shown}") } else { shown.to_string() },
+            target: format!("adb:{serial}"),
+            keyring: false,
+            stream: None,
+            ftp: None,
+            adb: Some(AdbLaunch { serial: serial.to_string(), logcat }),
+        }
     }
 
     pub fn stream(s: Stream) -> Self {
@@ -173,6 +203,7 @@ impl Launch {
             keyring: false,
             stream: Some(s),
             ftp: None,
+            adb: None,
         }
     }
 }
@@ -233,6 +264,13 @@ pub fn mux_dir() -> Option<PathBuf> {
 fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
     let mut argv = launch.argv.clone();
     let mut env = Vec::new();
+    if let (Kind::Adb, Some(a)) = (launch.kind, &launch.adb) {
+        // Waits for the device, so Enter after an unplug reconnects.
+        argv = vec![adb::bin()];
+        argv.extend(adb::select(&a.serial));
+        argv.extend(["wait-for-device".to_string(), "shell".into()]);
+        return (argv, env);
+    }
     if launch.kind != Kind::Ssh && launch.kind != Kind::Mosh {
         return (argv, env);
     }
@@ -264,9 +302,18 @@ fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
 
 /// Starts (or restarts) the child process of `term` on its own pty.
 pub fn run(term: &vte::Terminal, launch: &Launch) {
-    // Stream panes have no child process; the stream pane feeds them.
-    if launch.stream.is_some() {
+    // Stream and logcat panes have no child here; they feed the terminal.
+    if launch.stream.is_some() || launch.kind == Kind::Logcat {
         return;
+    }
+    if launch.kind == Kind::Adb {
+        let bin = adb::bin();
+        if !adb::found(&bin) {
+            term.feed(format!("\r\n\x1b[31m{bin} not found. Install adb (Debian/Ubuntu: adb, Arch: android-tools) or set \"adb\" in settings.json.\x1b[0m\r\n").as_bytes());
+            return;
+        }
+        let who = launch.adb.as_ref().map(|a| a.serial.as_str()).filter(|s| !s.is_empty()).unwrap_or("the device");
+        term.feed(format!("\x1b[2mwaiting for {who}…\x1b[0m\r\n").as_bytes());
     }
     let (Some(t), Some(out)) = (term.downcast_ref::<pty::Term>(), output::of(term)) else {
         crate::warn("terminal without pty support");

@@ -31,6 +31,8 @@ pub struct Settings {
     pub command_keys: bool,
     /// Bottom dock on the right side instead.
     pub dock_right: bool,
+    /// adb program; "adb" searches PATH.
+    pub adb: String,
 }
 
 impl Default for Settings {
@@ -47,6 +49,7 @@ impl Default for Settings {
             log_dir: String::new(),
             command_keys: false,
             dock_right: false,
+            adb: "adb".into(),
         }
     }
 }

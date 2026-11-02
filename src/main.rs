@@ -1,14 +1,17 @@
 // termvisor entry point.
 
+mod adb;
 mod askpass;
 mod cmdpanel;
 mod commands;
+mod devices;
 mod dock;
 mod editor;
 mod files;
 mod ftp;
 mod keyring;
 mod link;
+mod logcat;
 mod logpanel;
 mod mav;
 mod modem;

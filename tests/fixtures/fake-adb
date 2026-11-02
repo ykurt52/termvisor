@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+# Stand-in for the adb command line tool, for tests. It never talks to an
+# adb server or a device.
+#
+# Devices: FAKE001 (device), FAKE002 (unauthorized); track-devices adds
+# FAKE003 after 2 s. Device paths map into $FAKE_ADB_ROOT. Every call is
+# appended to $FAKE_ADB_LOG.
+
+import os
+import subprocess
+import sys
+import time
+
+ROOT = os.environ.get("FAKE_ADB_ROOT", "/tmp/fake-adb-root")
+LOG = os.environ.get("FAKE_ADB_LOG")
+
+DEVICES = [
+    ("FAKE001", "device", "product:fake model:Pixel_Fake device:fake transport_id:1"),
+    ("FAKE002", "unauthorized", "transport_id:2"),
+]
+LATER = ("FAKE003", "device", "product:fake2 model:Tab_Fake device:fake2 transport_id:3")
+
+LOGCAT = [
+    "11-02 14:30:01.100  1000  1000 I ActivityManager: Start proc 4242:com.example.app/u0a99",
+    "11-02 14:30:01.200  4242  4242 D ExampleApp: onCreate",
+    "11-02 14:30:01.300  4242  4250 W ExampleApp: slow frame: 48 ms",
+    "11-02 14:30:01.400  4242  4242 E ExampleApp: failed to open /sdcard/missing.txt",
+    "11-02 14:30:01.500   700   710 V Vold: probing disk",
+    "11-02 14:30:01.600   900   900 F libc: Fatal signal 11 (SIGSEGV)",
+    "--------- beginning of crash",
+]
+
+
+def log(argv):
+    if LOG:
+        with open(LOG, "a") as f:
+            f.write(" ".join(argv) + "\n")
+
+
+def listing(devs, long):
+    out = ""
+    for serial, state, extra in devs:
+        out += f"{serial}\t{state}" if not long else f"{serial:<22} {state} {extra}"
+        out += "\n"
+    return out
+
+
+def to_root(cmd):
+    # Commands from termvisor quote every path: '/x' -> '<root>/x'.
+    return cmd.replace("'/", "'" + ROOT + "/")
+
+
+def from_root(text):
+    return text.replace(ROOT, "")
+
+
+def main():
+    argv = sys.argv[1:]
+    log(argv)
+    serial = None
+    while argv and argv[0] in ("-s", "-t", "-P", "-H", "-d", "-e"):
+        if argv[0] in ("-s", "-t", "-P", "-H"):
+            if argv[0] == "-s":
+                serial = argv[1]
+            argv = argv[2:]
+        else:
+            argv = argv[1:]
+    if not argv:
+        sys.exit("fake-adb: no command")
+    cmd, rest = argv[0], argv[1:]
+
+    if cmd == "version":
+        print("Android Debug Bridge version 1.0.41 (fake)")
+        return
+    if cmd == "devices":
+        sys.stdout.write("List of devices attached\n" + listing(DEVICES, "-l" in rest) + "\n")
+        return
+    if cmd == "track-devices":
+        long = "-l" in rest
+        for devs in (DEVICES, DEVICES + [LATER]):
+            body = listing(devs, long).encode()
+            sys.stdout.buffer.write(b"%04x" % len(body) + body)
+            sys.stdout.flush()
+            time.sleep(2)
+        time.sleep(3600)
+        return
+
+    known = {s: st for s, st, _ in DEVICES + [LATER]}
+    if serial is None:
+        serial = "FAKE001"
+    if serial not in known:
+        sys.exit(f"adb: device '{serial}' not found")
+    if known[serial] != "device":
+        sys.exit("adb: device unauthorized.\nThis adb server's $ADB_VENDOR_KEYS is not set")
+
+    if cmd == "wait-for-device":
+        if not rest:
+            return
+        cmd, rest = rest[0], rest[1:]
+
+    os.makedirs(ROOT, exist_ok=True)
+    if cmd == "shell" and not rest:
+        env = dict(os.environ, PS1="fake:/ $ ", HOME=ROOT)
+        os.chdir(ROOT)
+        os.execvpe("bash", ["bash", "--norc", "--noprofile", "-i"], env)
+    if cmd in ("shell", "exec-out", "exec-in"):
+        line = to_root(" ".join(rest))
+        if cmd == "exec-in":
+            r = subprocess.run(["sh", "-c", line], cwd=ROOT)
+            sys.exit(r.returncode)
+        r = subprocess.run(["sh", "-c", line], cwd=ROOT, stdout=subprocess.PIPE)
+        out = r.stdout
+        if cmd == "shell":
+            out = from_root(out.decode(errors="replace")).encode()
+        sys.stdout.buffer.write(out)
+        sys.stdout.flush()
+        # Old adb shells always exit 0; termvisor reads a marker instead.
+        sys.exit(0 if cmd == "shell" else r.returncode)
+    if cmd == "logcat":
+        if "-c" in rest:
+            return
+        for l in LOGCAT:
+            print(l, flush=True)
+        n = 0
+        while True:
+            time.sleep(0.5)
+            n += 1
+            print(f"11-02 14:31:{n % 60:02d}.000  4242  4242 I ExampleApp: tick {n}", flush=True)
+    sys.exit(f"fake-adb: unknown command {cmd}")
+
+
+main()

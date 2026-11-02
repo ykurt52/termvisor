@@ -288,7 +288,11 @@ impl Ui {
                 self.open(&Launch::mosh(vec!["--".into(), target.clone()], &target), true);
                 self.quick.set_text("");
             }
-            None => self.toast("Use user@host[:port], ssh <args>, mosh host, /dev/ttyX[@baud], telnet://host, tcp://host:port, ftp://host"),
+            Some(Quick::Adb(serial)) => {
+                self.open(&Launch::adb(&serial, "", false), true);
+                self.quick.set_text("");
+            }
+            None => self.toast("Use user@host[:port], ssh <args>, mosh host, /dev/ttyX[@baud], telnet://host, tcp://host:port, ftp://host, adb://serial"),
         }
     }
 }
@@ -628,6 +632,12 @@ fn add_actions(ui: &Ui) {
             .and_then(|s| serde_json::from_str::<(String, FtpCfg, bool)>(&s).ok());
         if let Some((title, cfg, keyring)) = parsed {
             u.open_ftp(&title, cfg, keyring);
+        }
+    });
+    action(ui, "adb-files", Some(&glib::VariantType::new("(ss)").expect("type")), |u, p| {
+        if let Some((serial, name)) = p.and_then(|v| v.get::<(String, String)>()) {
+            u.sidebar.files.open_target(Target::Adb(crate::adb::bin(), serial), &format!("{name} · adb"));
+            u.sidebar.show("files");
         }
     });
     action(ui, "release-all", None, |u, _| u.release());
