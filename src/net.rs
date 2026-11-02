@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn refused_port_reports_closed() {
-        let port = TcpListener::bind("127.0.0.1:0").expect("bind").local_addr().expect("addr").port();
+        let (_hold, port) = crate::nettools::closed_port();
         let cfg = NetCfg { host: "127.0.0.1".into(), port, ..Default::default() };
         let (_conn, rx) = open(&cfg, true).expect("open");
         assert!(matches!(rx.recv_blocking(), Ok(Event::Closed(_))));

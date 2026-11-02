@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::adb::AdbLaunch;
 use crate::ftp::FtpCfg;
 use crate::store;
-use crate::term::{Kind, Launch, Stream, UsbLaunch};
+use crate::term::{Kind, Launch, Stream, Tool, UsbLaunch};
 
 const MAX: usize = 10;
 
@@ -35,6 +35,8 @@ pub struct Recent {
     pub adb: Option<AdbLaunch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usb: Option<UsbLaunch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<Tool>,
 }
 
 impl Recent {
@@ -50,6 +52,7 @@ impl Recent {
             ftp: l.ftp.clone(),
             adb: l.adb.clone(),
             usb: l.usb.clone(),
+            tool: l.tool,
         }
     }
 
@@ -63,6 +66,8 @@ impl Recent {
             Launch::stream(s.clone())
         } else if let Some(c) = &self.ftp {
             Launch::ftp(c.clone())
+        } else if let Some(t) = self.tool {
+            Launch::tool(t)
         } else if let Some(u) = &self.usb {
             Launch::usb(u.clone(), &self.title)
         } else if let Some(a) = &self.adb {
@@ -75,7 +80,7 @@ impl Recent {
     }
 
     fn same(&self, o: &Recent) -> bool {
-        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp && self.adb == o.adb && self.usb == o.usb
+        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp && self.adb == o.adb && self.usb == o.usb && self.tool == o.tool
     }
 }
 

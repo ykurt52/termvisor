@@ -19,6 +19,7 @@ Milestone 1 plus the UI shell:
 - Android: live device list, adb shell, logcat view with filters, device files
 - Multi-exec, macros with expect, SSH tunnels (-L/-R/-D) with reconnect
 - USB capture (usbmon): decoded transfers, serial view for USB serial adapters, pcap
+- Tools: TFTP and HTTP servers, port scanner, ping with a graph, traceroute, Wake-on-LAN
 - Bottom dock and status bar
 - Live theme switching
 
@@ -99,6 +100,7 @@ Timestamps, highlight, logging: [docs/output.md](docs/output.md).
 Android devices: [docs/adb.md](docs/adb.md).
 Multi-exec, macros, tunnels: [docs/multiexec.md](docs/multiexec.md), [docs/macros.md](docs/macros.md), [docs/tunnels.md](docs/tunnels.md).
 USB capture: [docs/usb.md](docs/usb.md).
+TFTP, HTTP, scanner, ping, Wake-on-LAN: [docs/tools.md](docs/tools.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files
@@ -110,6 +112,7 @@ Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termv
 | `~/.config/termvisor/commands.toml` | Command panel pages, see [docs/commands.md](docs/commands.md) |
 | `~/.config/termvisor/highlight.toml` | Highlight rules, see [docs/output.md](docs/output.md) |
 | `~/.config/termvisor/macros.toml`, `tunnels.toml` | Macros and tunnels |
+| `~/.config/termvisor/tools.toml` | Tool settings and Wake-on-LAN list |
 | `~/.local/share/termvisor/logs/` | Session logs |
 | `~/.local/state/termvisor/recent.json`, `tabs.json` | Recent sessions, saved tabs |
 | `~/.config/termvisor/themes/*.json` | User themes, see [docs/themes.md](docs/themes.md) |

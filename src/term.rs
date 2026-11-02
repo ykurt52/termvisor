@@ -34,6 +34,8 @@ pub enum Kind {
     Logcat,
     /// USB traffic capture.
     Usb,
+    /// Network tool tab (servers, scanner, ping).
+    Tool,
 }
 
 impl Kind {
@@ -49,6 +51,7 @@ impl Kind {
             Kind::Adb => "ADB",
             Kind::Logcat => "Logcat",
             Kind::Usb => "USB",
+            Kind::Tool => "Tool",
         }
     }
 
@@ -64,6 +67,7 @@ impl Kind {
             Kind::Adb => "phone-symbolic",
             Kind::Logcat => "view-list-symbolic",
             Kind::Usb => "drive-removable-media-symbolic",
+            Kind::Tool => "applications-utilities-symbolic",
         }
     }
 }
@@ -127,6 +131,30 @@ pub struct Launch {
     pub adb: Option<AdbLaunch>,
     /// USB capture.
     pub usb: Option<UsbLaunch>,
+    /// Network tool.
+    pub tool: Option<Tool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tool {
+    Tftp,
+    Http,
+    Scan,
+    Ping,
+    Trace,
+}
+
+impl Tool {
+    pub fn title(self) -> &'static str {
+        match self {
+            Tool::Tftp => "TFTP Server",
+            Tool::Http => "HTTP Server",
+            Tool::Scan => "Port Scanner",
+            Tool::Ping => "Ping",
+            Tool::Trace => "Traceroute",
+        }
+    }
 }
 
 /// What a USB capture tab shows.
@@ -159,6 +187,7 @@ impl Launch {
             ftp: None,
             adb: None,
             usb: None,
+            tool: None,
         }
     }
 
@@ -177,6 +206,7 @@ impl Launch {
             ftp: None,
             adb: None,
             usb: None,
+            tool: None,
         }
     }
 
@@ -192,6 +222,7 @@ impl Launch {
             ftp: Some(cfg),
             adb: None,
             usb: None,
+            tool: None,
         }
     }
 
@@ -217,6 +248,7 @@ impl Launch {
             ftp: None,
             adb: Some(AdbLaunch { serial: serial.to_string(), logcat }),
             usb: None,
+            tool: None,
         }
     }
 
@@ -237,6 +269,23 @@ impl Launch {
             ftp: None,
             adb: None,
             usb: Some(u),
+            tool: None,
+        }
+    }
+
+    pub fn tool(t: Tool) -> Self {
+        Self {
+            kind: Kind::Tool,
+            argv: Vec::new(),
+            dir: None,
+            title: t.title().into(),
+            target: format!("tool:{}", t.title().to_lowercase()),
+            keyring: false,
+            stream: None,
+            ftp: None,
+            adb: None,
+            usb: None,
+            tool: Some(t),
         }
     }
 
@@ -252,6 +301,7 @@ impl Launch {
             ftp: None,
             adb: None,
             usb: None,
+            tool: None,
         }
     }
 }
@@ -359,7 +409,7 @@ pub fn ssh_env(target: &str, keyring: bool) -> Vec<String> {
 /// Starts (or restarts) the child process of `term` on its own pty.
 pub fn run(term: &vte::Terminal, launch: &Launch) {
     // Stream and logcat panes have no child here; they feed the terminal.
-    if launch.stream.is_some() || matches!(launch.kind, Kind::Logcat | Kind::Usb) {
+    if launch.stream.is_some() || matches!(launch.kind, Kind::Logcat | Kind::Usb | Kind::Tool) {
         return;
     }
     if launch.kind == Kind::Adb {
