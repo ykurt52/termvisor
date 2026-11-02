@@ -1,0 +1,36 @@
+{
+    "name": "High Contrast",
+    "kind": "dark",
+    "ui": {
+        "bg": "#000000",
+        "fg": "#ffffff",
+        "panel": "#0a0a0a",
+        "header": "#000000",
+        "accent": "#ffd700",
+        "border": "#9a9a9a"
+    },
+    "term": {
+        "fg": "#ffffff",
+        "bg": "#000000",
+        "cursor": "#ffd700",
+        "selection": "#1f4e99",
+        "palette": [
+            "#000000",
+            "#ff3333",
+            "#00ff66",
+            "#ffff00",
+            "#3399ff",
+            "#ff66ff",
+            "#00ffff",
+            "#ffffff",
+            "#808080",
+            "#ff5555",
+            "#33ff88",
+            "#ffff55",
+            "#66b3ff",
+            "#ff88ff",
+            "#55ffff",
+            "#ffffff"
+        ]
+    }
+}

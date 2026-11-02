@@ -2,14 +2,39 @@
 
 A theme is one JSON file. It sets the UI colors and the terminal palette.
 
+## Bundled
+
+Dark, Light, High Contrast, Dracula, Solarized Dark, Solarized Light,
+Gruvbox, Nord, One Dark.
+
+## Choosing
+
+- Menu → Theme, the command palette ("Theme: …"), or Preferences →
+  Appearance.
+- **Follow System Style** (Preferences): one theme for a light system,
+  another for a dark one; switches when the system does.
+- **Session Themes** (Preferences): panes whose title or target matches
+  get their own theme, e.g. `root@prod*` → High Contrast, so a production
+  shell never looks like a test one. Patterns are comma separated, `*`
+  and `?` match.
+
+## Editor
+
+Menu → Theme → Edit Theme… (or Preferences → Edit Theme…). It starts
+from the current theme: a bundled one is copied ("… Copy"), a user theme
+is edited in place. Every color change shows at once on the whole
+window; Cancel or closing the editor puts the old theme back. Save writes
+the file and selects it; the trash button deletes a user theme.
+
 ## Location
 
-- Builtin: `themes/` in the source tree, compiled into the binary.
-- User: `~/.config/termvisor/themes/*.json`, loaded at startup.
-  A user theme with the same `name` as a builtin replaces it.
+- Bundled: `themes/` in the source tree, compiled into the binary.
+- User: `~/.config/termvisor/themes/*.json`. Changes to this folder apply
+  at once (no restart). A user theme with the name of a bundled one
+  replaces it.
 
-Pick a theme from the main menu → Theme. The choice is saved to
-`~/.config/termvisor/settings.json`.
+The choice is saved to `~/.config/termvisor/settings.json` (`theme`,
+`follow_system`, `theme_light`, `theme_dark`, `theme_rules`).
 
 ## Format
 

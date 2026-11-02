@@ -33,6 +33,30 @@ pub struct Settings {
     pub dock_right: bool,
     /// adb program; "adb" searches PATH.
     pub adb: String,
+    /// Use `theme_light` / `theme_dark` after the system style.
+    pub follow_system: bool,
+    pub theme_light: String,
+    pub theme_dark: String,
+    /// Themes for panes whose title or target matches.
+    pub theme_rules: Vec<ThemeRule>,
+}
+
+/// Theme for panes matching comma separated globs, e.g. "root@prod*".
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThemeRule {
+    pub sessions: String,
+    pub theme: String,
+}
+
+impl ThemeRule {
+    pub fn matches(&self, title: &str, target: &str) -> bool {
+        self.sessions
+            .split(',')
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+            .any(|g| crate::commands::glob(g, title) || crate::commands::glob(g, target))
+    }
 }
 
 impl Default for Settings {
@@ -50,6 +74,10 @@ impl Default for Settings {
             command_keys: false,
             dock_right: false,
             adb: "adb".into(),
+            follow_system: false,
+            theme_light: "Light".into(),
+            theme_dark: "Dark".into(),
+            theme_rules: Vec::new(),
         }
     }
 }

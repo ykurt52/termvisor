@@ -32,25 +32,6 @@ use crate::status::Status;
 use crate::term::{self, Launch, Stream};
 use crate::welcome;
 
-/// Keyboard shortcuts for window actions.
-pub const ACCELS: &[(&str, &[&str])] = &[
-    ("win.new-tab", &["<Ctrl><Shift>t"]),
-    ("win.close-pane", &["<Ctrl><Shift>w"]),
-    ("win.split-right", &["<Ctrl><Shift>e"]),
-    ("win.split-down", &["<Ctrl><Shift>o"]),
-    ("win.copy", &["<Ctrl><Shift>c"]),
-    ("win.paste", &["<Ctrl><Shift>v"]),
-    ("win.zoom-in", &["<Ctrl>plus", "<Ctrl>equal"]),
-    ("win.zoom-out", &["<Ctrl>minus"]),
-    ("win.zoom-reset", &["<Ctrl>0"]),
-    ("win.toggle-sidebar", &["<Ctrl><Shift>b"]),
-    ("win.toggle-dock", &["<Ctrl><Shift>j"]),
-    ("win.quick-connect", &["<Ctrl><Shift>l"]),
-    ("win.find-session", &["<Ctrl><Shift>k"]),
-    ("win.release-all", &["<Ctrl><Shift>r"]),
-    ("win.multi-exec", &["<Ctrl><Shift>m"]),
-];
-
 /// Widgets the actions need.
 #[derive(Clone)]
 struct Ui {
@@ -604,6 +585,20 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     view
 }
 
+fn fill_themes(menu: &gio::Menu, state: &State) {
+    menu.remove_all();
+    let names = gio::Menu::new();
+    for t in state.themes() {
+        let item = gio::MenuItem::new(Some(&t.name), None);
+        item.set_action_and_target_value(Some("win.theme"), Some(&t.name.to_variant()));
+        names.append_item(&item);
+    }
+    menu.append_section(None, &names);
+    let edit = gio::Menu::new();
+    edit.append(Some("Edit Theme…"), Some("win.edit-theme"));
+    menu.append_section(None, &edit);
+}
+
 fn menu_model(state: &Rc<State>) -> gio::Menu {
     let panes = gio::Menu::new();
     panes.append(Some("Split Right"), Some("win.split-right"));
@@ -623,17 +618,24 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     sess.append(Some("Restore Tabs on Start"), Some("win.restore-tabs"));
 
     let themes = gio::Menu::new();
-    for t in &state.themes {
-        let item = gio::MenuItem::new(Some(&t.name), None);
-        item.set_action_and_target_value(Some("win.theme"), Some(&t.name.to_variant()));
-        themes.append_item(&item);
-    }
+    fill_themes(&themes, state);
+    // User themes come and go (editor, files changed on disk).
+    let (w, st) = (themes.downgrade(), Rc::downgrade(state));
+    state.on_themes(move || {
+        if let (Some(m), Some(s)) = (w.upgrade(), st.upgrade()) {
+            fill_themes(&m, &s);
+        }
+    });
 
     let menu = gio::Menu::new();
     menu.append_section(None, &sess);
     menu.append_section(None, &panes);
     menu.append_section(None, &view);
     menu.append_submenu(Some("Theme"), &themes);
+    let app = gio::Menu::new();
+    app.append(Some("Command Palette…"), Some("win.palette"));
+    app.append(Some("Preferences…"), Some("win.preferences"));
+    menu.append_section(None, &app);
     let rescue = gio::Menu::new();
     rescue.append(Some("Release All Connections…"), Some("win.release-all"));
     menu.append_section(None, &rescue);
@@ -657,6 +659,36 @@ where
     action(ui, name, None, move |u, _| {
         if let Some(t) = u.active() {
             f(u, &t);
+        }
+    });
+}
+
+/// Every window action with its shortcut, and the themes.
+fn command_palette(u: &Ui) {
+    let map = crate::keybindings::load();
+    let mut items = Vec::new();
+    let mut targets: Vec<(String, Option<glib::Variant>)> = Vec::new();
+    for (action, label, _) in crate::keybindings::ACTIONS {
+        // Leave out actions that cannot run now (and the palette itself).
+        let name = action.trim_start_matches("win.");
+        if name == "palette" || !u.win.lookup_action(name).is_some_and(|a| a.is_enabled()) {
+            continue;
+        }
+        let keys = crate::keybindings::keys(&map, action);
+        let detail = keys.first().map(|k| crate::keys::label(k)).unwrap_or_default();
+        items.push(palette::Item { label: label.to_string(), icon: "system-run-symbolic", tint: "", detail });
+        targets.push((action.to_string(), None));
+    }
+    let current = u.state.theme().map(|t| t.name).unwrap_or_default();
+    for t in u.state.themes() {
+        let detail = if t.name == current { "current".to_string() } else { String::new() };
+        items.push(palette::Item { label: format!("Theme: {}", t.name), icon: "applications-graphics-symbolic", tint: "tint-magenta", detail });
+        targets.push(("win.theme".into(), Some(t.name.to_variant())));
+    }
+    let win = u.win.clone();
+    palette::choose(&u.win, "Commands", "Type a command", items, move |i| {
+        if let Some((action, param)) = targets.get(i) {
+            let _ = WidgetExt::activate_action(&win, action, param.as_ref());
         }
     });
 }
@@ -725,6 +757,9 @@ fn add_actions(ui: &Ui) {
         }
     });
     ui.win.add_action(&me);
+    action(ui, "preferences", None, |u, _| crate::prefs::open(&u.win, &u.state));
+    action(ui, "palette", None, |u, _| command_palette(u));
+    action(ui, "edit-theme", None, |u, _| crate::themeedit::open(&u.win, &u.state));
     action(ui, "release-all", None, |u, _| u.release());
     action(ui, "import", None, |u, _| u.import());
     action(ui, "export", None, |u, _| u.export());
@@ -779,6 +814,12 @@ fn add_actions(ui: &Ui) {
         u.state.set_theme(&name);
         a.set_state(&name.to_variant());
         u.refresh_status();
+    });
+    let (w, st) = (theme.downgrade(), Rc::downgrade(&ui.state));
+    ui.state.on_themes(move || {
+        if let (Some(a), Some(s)) = (w.upgrade(), st.upgrade()) {
+            a.set_state(&s.theme().map(|t| t.name).unwrap_or_default().to_variant());
+        }
     });
     ui.win.add_action(&theme);
 }

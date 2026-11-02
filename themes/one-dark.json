@@ -1,0 +1,36 @@
+{
+    "name": "One Dark",
+    "kind": "dark",
+    "ui": {
+        "bg": "#282c34",
+        "fg": "#abb2bf",
+        "panel": "#21252b",
+        "header": "#21252b",
+        "accent": "#61afef",
+        "border": "#181a1f"
+    },
+    "term": {
+        "fg": "#abb2bf",
+        "bg": "#282c34",
+        "cursor": "#528bff",
+        "selection": "#3e4451",
+        "palette": [
+            "#282c34",
+            "#e06c75",
+            "#98c379",
+            "#e5c07b",
+            "#61afef",
+            "#c678dd",
+            "#56b6c2",
+            "#abb2bf",
+            "#5c6370",
+            "#e06c75",
+            "#98c379",
+            "#e5c07b",
+            "#61afef",
+            "#c678dd",
+            "#56b6c2",
+            "#ffffff"
+        ]
+    }
+}

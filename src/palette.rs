@@ -1,4 +1,4 @@
-// Fuzzy session finder (Ctrl+Shift+K).
+// Fuzzy finders: sessions (Ctrl+Shift+K) and commands (Ctrl+Shift+P).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,12 +11,26 @@ use crate::sidebar::OpenFn;
 
 const LIMIT: usize = 50;
 
-fn row(label: &str, node: &Node) -> gtk::ListBoxRow {
-    let icon = gtk::Image::from_icon_name(node.icon);
-    icon.add_css_class(node.tint);
-    let text = gtk::Label::new(Some(label));
+/// A choice in a finder.
+pub struct Item {
+    pub label: String,
+    pub icon: &'static str,
+    pub tint: &'static str,
+    /// Shown on the right, e.g. a shortcut.
+    pub detail: String,
+}
+
+fn row(item: &Item) -> gtk::ListBoxRow {
+    let icon = gtk::Image::from_icon_name(item.icon);
+    if !item.tint.is_empty() {
+        icon.add_css_class(item.tint);
+    }
+    let text = gtk::Label::new(Some(&item.label));
     text.set_xalign(0.0);
+    text.set_hexpand(true);
     text.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    let detail = gtk::Label::new(Some(&item.detail));
+    detail.add_css_class("dim-label");
     let b = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     b.set_margin_top(6);
     b.set_margin_bottom(6);
@@ -24,15 +38,26 @@ fn row(label: &str, node: &Node) -> gtk::ListBoxRow {
     b.set_margin_end(8);
     b.append(&icon);
     b.append(&text);
+    b.append(&detail);
     let r = gtk::ListBoxRow::new();
     r.set_child(Some(&b));
     r
 }
 
-/// Shows the finder over `parent` for `items` (label, node).
+/// Shows the session finder over `parent`.
 pub fn open(parent: &impl IsA<gtk::Widget>, items: Vec<(String, Node)>, pick: OpenFn) {
+    let shown: Vec<Item> = items.iter().map(|(label, n)| Item { label: label.clone(), icon: n.icon, tint: n.tint, detail: String::new() }).collect();
+    choose(parent, "Find Session", "Find a session", shown, move |i| {
+        if let NodeKind::Item(l) = &items[i].1.kind {
+            pick(l.clone());
+        }
+    });
+}
+
+/// Fuzzy list over `parent`; `pick` gets the index of the chosen item.
+pub fn choose(parent: &impl IsA<gtk::Widget>, title: &str, hint: &str, items: Vec<Item>, pick: impl Fn(usize) + 'static) {
     let entry = gtk::SearchEntry::new();
-    entry.set_placeholder_text(Some("Find a session"));
+    entry.set_placeholder_text(Some(hint));
     entry.set_hexpand(true);
 
     let list = gtk::ListBox::new();
@@ -50,7 +75,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, items: Vec<(String, Node)>, pick: Op
     body.append(&scroll);
 
     let dlg = adw::Dialog::new();
-    dlg.set_title("Find Session");
+    dlg.set_title(title);
     dlg.set_content_width(520);
     dlg.set_content_height(420);
     dlg.set_child(Some(&body));
@@ -66,15 +91,14 @@ pub fn open(parent: &impl IsA<gtk::Widget>, items: Vec<(String, Node)>, pick: Op
             let mut ranked: Vec<(i32, usize)> = items
                 .iter()
                 .enumerate()
-                .filter_map(|(i, (label, _))| sessions::fuzzy(q, label).map(|s| (s, i)))
+                .filter_map(|(i, it)| sessions::fuzzy(q, &it.label).map(|s| (s, i)))
                 .collect();
             ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             ranked.truncate(LIMIT);
             let mut sh = shown.borrow_mut();
             sh.clear();
             for (_, i) in ranked {
-                let (label, node) = &items[i];
-                list.append(&row(label, node));
+                list.append(&row(&items[i]));
                 sh.push(i);
             }
             if let Some(first) = list.row_at_index(0) {
@@ -87,14 +111,12 @@ pub fn open(parent: &impl IsA<gtk::Widget>, items: Vec<(String, Node)>, pick: Op
     entry.connect_search_changed(move |e| f(&e.text()));
 
     let choose = {
-        let (d, items, shown) = (dlg.clone(), items.clone(), shown.clone());
+        let (d, shown) = (dlg.clone(), shown.clone());
         Rc::new(move |r: &gtk::ListBoxRow| {
             let Ok(pos) = usize::try_from(r.index()) else { return };
             let Some(&i) = shown.borrow().get(pos) else { return };
-            if let NodeKind::Item(l) = &items[i].1.kind {
-                d.close();
-                pick(l.clone());
-            }
+            d.close();
+            pick(i);
         })
     };
     let c = choose.clone();

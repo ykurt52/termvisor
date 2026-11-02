@@ -17,7 +17,12 @@ use crate::xfers::Xfers;
 type TermFn = Box<dyn Fn(&vte::Terminal)>;
 
 pub struct State {
-    pub themes: Vec<Theme>,
+    themes: RefCell<Vec<Theme>>,
+    /// Theme shown while the editor changes it.
+    preview: RefCell<Option<Theme>>,
+    theme_listeners: RefCell<Vec<Box<dyn Fn()>>>,
+    /// Watches the user theme folder.
+    monitor: RefCell<Option<gtk::gio::FileMonitor>>,
     pub cfg: RefCell<Settings>,
     pub store: RefCell<Store>,
     pub recent: RefCell<Vec<Recent>>,
@@ -52,7 +57,10 @@ impl State {
             }
         }
         let state = Rc::new(Self {
-            themes: theme::load(&settings::dir().join("themes")),
+            themes: RefCell::new(theme::load(&theme_dir())),
+            preview: RefCell::new(None),
+            theme_listeners: RefCell::new(Vec::new()),
+            monitor: RefCell::new(None),
             cfg: RefCell::new(Settings::load()),
             store: RefCell::new(Store::load()),
             recent: RefCell::new(recent::load(recent::RECENT)),
@@ -67,24 +75,121 @@ impl State {
             css,
         });
         state.apply();
+        state.watch_themes();
+        // Following the system: its style may change any time.
+        let w = Rc::downgrade(&state);
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(s) = w.upgrade() {
+                if s.cfg.borrow().follow_system && s.preview.borrow().is_none() {
+                    s.apply();
+                }
+            }
+        });
         state
     }
 
+    /// Reloads user themes when their folder changes (a short delay
+    /// collects the events of one save).
+    fn watch_themes(self: &Rc<Self>) {
+        let dir = theme_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let Ok(m) = gtk::gio::File::for_path(&dir).monitor_directory(gtk::gio::FileMonitorFlags::NONE, None::<&gtk::gio::Cancellable>) else { return };
+        let w = Rc::downgrade(self);
+        let pending = Rc::new(std::cell::Cell::new(false));
+        m.connect_changed(move |_, _, _, _| {
+            if pending.replace(true) {
+                return;
+            }
+            let (w, p) = (w.clone(), pending.clone());
+            glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+                p.set(false);
+                if let Some(s) = w.upgrade() {
+                    s.reload_themes();
+                }
+            });
+        });
+        self.monitor.replace(Some(m));
+    }
+
+    pub fn themes(&self) -> Vec<Theme> {
+        self.themes.borrow().clone()
+    }
+
+    fn named(&self, name: &str) -> Option<Theme> {
+        self.themes.borrow().iter().find(|t| t.name == name).cloned()
+    }
+
+    /// Name of the chosen theme (after the system style when following it).
+    fn chosen(&self) -> String {
+        let c = self.cfg.borrow();
+        if !c.follow_system {
+            return c.theme.clone();
+        }
+        if adw::StyleManager::default().is_dark() { c.theme_dark.clone() } else { c.theme_light.clone() }
+    }
+
     /// Active theme, falling back to the first one.
-    pub fn theme(&self) -> Option<&Theme> {
-        let name = self.cfg.borrow().theme.clone();
-        self.themes
-            .iter()
-            .find(|t| t.name == name)
-            .or_else(|| self.themes.first())
+    pub fn theme(&self) -> Option<Theme> {
+        if let Some(p) = self.preview.borrow().clone() {
+            return Some(p);
+        }
+        self.named(&self.chosen()).or_else(|| self.themes.borrow().first().cloned())
+    }
+
+    /// Theme of a pane: a matching rule's, else the active one.
+    fn theme_for(&self, l: &Launch) -> Option<Theme> {
+        let rule = self.cfg.borrow().theme_rules.iter().find(|r| r.matches(&l.title, &l.target)).map(|r| r.theme.clone());
+        rule.and_then(|n| self.named(&n)).or_else(|| self.theme())
     }
 
     pub fn set_theme(&self, name: &str) {
-        self.cfg.borrow_mut().theme = name.to_string();
-        if let Err(e) = self.cfg.borrow().save() {
-            crate::warn(&format!("save settings: {e}"));
-        }
+        self.edit_cfg(|c| {
+            c.theme = name.to_string();
+            c.follow_system = false;
+        });
         self.apply();
+        self.themes_changed();
+    }
+
+    /// Shows `t` everywhere until called with None (theme editor).
+    pub fn preview(&self, t: Option<Theme>) {
+        self.preview.replace(t);
+        self.apply();
+    }
+
+    pub fn reload_themes(&self) {
+        self.themes.replace(theme::load(&theme_dir()));
+        self.apply();
+        self.themes_changed();
+    }
+
+    /// Calls `f` when the theme list or the chosen theme changes.
+    pub fn on_themes(&self, f: impl Fn() + 'static) {
+        self.theme_listeners.borrow_mut().push(Box::new(f));
+    }
+
+    fn themes_changed(&self) {
+        for f in self.theme_listeners.borrow().iter() {
+            f();
+        }
+    }
+
+    /// Applies theme settings (follow system, rules) after they changed.
+    pub fn retheme(&self) {
+        self.apply();
+        self.themes_changed();
+    }
+
+    /// Font and scrollback from settings, on every open terminal.
+    pub fn apply_terminal_prefs(&self) {
+        let (font, lines) = {
+            let c = self.cfg.borrow();
+            (gtk::pango::FontDescription::from_string(&c.font), c.scrollback)
+        };
+        for term in self.terms.borrow().iter().filter_map(|(w, _)| w.upgrade()) {
+            term.set_font(Some(&font));
+            term.set_scrollback_lines(lines as _);
+        }
     }
 
     /// Calls `f` whenever sessions change.
@@ -171,8 +276,9 @@ impl State {
         let mut terms = self.terms.borrow_mut();
         terms.retain(|(w, _)| w.upgrade().is_some());
         terms.push((term.downgrade(), launch.clone()));
-        if let Some(t) = self.theme() {
-            paint(term, t);
+        drop(terms);
+        if let Some(t) = self.theme_for(launch) {
+            paint(term, &t);
         }
     }
 
@@ -186,23 +292,35 @@ impl State {
     }
 
     fn apply(&self) {
+        let follow = self.cfg.borrow().follow_system && self.preview.borrow().is_none();
+        let sm = adw::StyleManager::default();
+        // Following the system needs its own style, so the scheme is not forced.
+        if follow {
+            sm.set_color_scheme(adw::ColorScheme::Default);
+        }
         let Some(t) = self.theme() else {
             return;
         };
-        let scheme = if t.dark {
-            adw::ColorScheme::ForceDark
-        } else {
-            adw::ColorScheme::ForceLight
-        };
-        adw::StyleManager::default().set_color_scheme(scheme);
+        if !follow {
+            sm.set_color_scheme(if t.dark { adw::ColorScheme::ForceDark } else { adw::ColorScheme::ForceLight });
+        }
         self.css.load_from_string(&t.css);
 
-        let mut terms = self.terms.borrow_mut();
-        terms.retain(|(w, _)| w.upgrade().is_some());
-        for term in terms.iter().filter_map(|(w, _)| w.upgrade()) {
-            paint(&term, t);
+        let terms: Vec<(vte::Terminal, Launch)> = {
+            let mut terms = self.terms.borrow_mut();
+            terms.retain(|(w, _)| w.upgrade().is_some());
+            terms.iter().filter_map(|(w, l)| w.upgrade().map(|t| (t, l.clone()))).collect()
+        };
+        for (term, l) in terms {
+            if let Some(x) = self.theme_for(&l) {
+                paint(&term, &x);
+            }
         }
     }
+}
+
+pub fn theme_dir() -> std::path::PathBuf {
+    settings::dir().join("themes")
 }
 
 fn paint(term: &vte::Terminal, t: &Theme) {
@@ -211,4 +329,53 @@ fn paint(term: &vte::Terminal, t: &Theme) {
     term.set_colors(Some(&c.fg), Some(&c.bg), &palette);
     term.set_color_cursor(Some(&c.cursor));
     term.set_color_highlight(Some(&c.selection));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::ThemeRule;
+
+    /// Everything that needs GTK, in one test: GTK runs on one thread.
+    /// Settings are changed in memory only; nothing is saved.
+    #[test]
+    fn with_gtk() {
+        if gtk::init().is_err() || adw::init().is_err() {
+            return;
+        }
+        crate::keybindings::tests::check();
+
+        let st = State::new();
+        {
+            let mut c = st.cfg.borrow_mut();
+            c.theme = "Dark".into();
+            c.follow_system = false;
+            c.theme_rules = vec![ThemeRule { sessions: "root@prod*, /dev/ttyUSB*".into(), theme: "Nord".into() }];
+        }
+        st.retheme();
+        let prod = Launch::ssh(vec!["root@prod1".into()], "root@prod1");
+        assert_eq!(st.theme_for(&prod).map(|t| t.name), Some("Nord".into()));
+        assert_eq!(st.theme_for(&Launch::shell(None)).map(|t| t.name), Some("Dark".into()));
+        assert!(!adw::StyleManager::default().is_dark() || st.theme().is_some_and(|t| t.dark));
+
+        // Preview shows a theme everywhere until cleared.
+        let mut f = st.theme().expect("theme").file;
+        f.name = "Preview".into();
+        st.preview(Some(theme::build(f).expect("build")));
+        assert_eq!(st.theme().map(|t| t.name), Some("Preview".into()));
+        st.preview(None);
+        assert_eq!(st.theme().map(|t| t.name), Some("Dark".into()));
+
+        // Following the system picks the light or dark theme.
+        {
+            let mut c = st.cfg.borrow_mut();
+            c.follow_system = true;
+            c.theme_light = "Solarized Light".into();
+            c.theme_dark = "One Dark".into();
+        }
+        st.retheme();
+        let want = if adw::StyleManager::default().is_dark() { "One Dark" } else { "Solarized Light" };
+        assert_eq!(st.theme().map(|t| t.name), Some(want.into()));
+        assert_eq!(st.themes().iter().filter(|t| t.path.is_none()).count(), 9);
+    }
 }

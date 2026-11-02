@@ -1,0 +1,36 @@
+{
+    "name": "Solarized Light",
+    "kind": "light",
+    "ui": {
+        "bg": "#fdf6e3",
+        "fg": "#586e75",
+        "panel": "#eee8d5",
+        "header": "#eee8d5",
+        "accent": "#268bd2",
+        "border": "#d6cfb8"
+    },
+    "term": {
+        "fg": "#657b83",
+        "bg": "#fdf6e3",
+        "cursor": "#586e75",
+        "selection": "#eee8d5",
+        "palette": [
+            "#073642",
+            "#dc322f",
+            "#859900",
+            "#b58900",
+            "#268bd2",
+            "#d33682",
+            "#2aa198",
+            "#eee8d5",
+            "#586e75",
+            "#cb4b16",
+            "#859900",
+            "#b58900",
+            "#268bd2",
+            "#6c71c4",
+            "#2aa198",
+            "#fdf6e3"
+        ]
+    }
+}

@@ -1,50 +1,56 @@
 // Theme files: parsing, validation and CSS generation.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use gtk::gdk;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-const BUILTIN: [&str; 5] = [
+const BUILTIN: [&str; 9] = [
     include_str!("../themes/dark.json"),
     include_str!("../themes/light.json"),
+    include_str!("../themes/high-contrast.json"),
     include_str!("../themes/dracula.json"),
+    include_str!("../themes/solarized-dark.json"),
+    include_str!("../themes/solarized-light.json"),
     include_str!("../themes/gruvbox.json"),
     include_str!("../themes/nord.json"),
+    include_str!("../themes/one-dark.json"),
 ];
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum Kind {
+pub enum Kind {
     Dark,
     Light,
 }
 
-#[derive(Deserialize)]
-struct UiFile {
-    bg: String,
-    fg: String,
-    panel: String,
-    header: String,
-    accent: String,
-    border: String,
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UiFile {
+    pub bg: String,
+    pub fg: String,
+    pub panel: String,
+    pub header: String,
+    pub accent: String,
+    pub border: String,
 }
 
-#[derive(Deserialize)]
-struct TermFile {
-    fg: String,
-    bg: String,
-    cursor: String,
-    selection: String,
-    palette: Vec<String>,
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TermFile {
+    pub fg: String,
+    pub bg: String,
+    pub cursor: String,
+    pub selection: String,
+    pub palette: Vec<String>,
 }
 
-#[derive(Deserialize)]
-struct ThemeFile {
-    name: String,
-    kind: Kind,
-    ui: UiFile,
-    term: TermFile,
+/// A theme as stored in JSON.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThemeFile {
+    pub name: String,
+    pub kind: Kind,
+    pub ui: UiFile,
+    pub term: TermFile,
 }
 
 /// Terminal colors, ready for VTE.
@@ -64,13 +70,18 @@ pub struct Theme {
     pub dark: bool,
     pub css: String,
     pub colors: Colors,
+    /// Source, for the editor.
+    pub file: ThemeFile,
+    /// File of a user theme; None for the bundled ones.
+    pub path: Option<PathBuf>,
 }
 
 fn rgba(s: &str) -> Result<gdk::RGBA, String> {
     gdk::RGBA::parse(s).map_err(|_| format!("invalid color '{s}'"))
 }
 
-fn build(file: ThemeFile) -> Result<Theme, String> {
+/// Checks the colors and makes the CSS.
+pub fn build(file: ThemeFile) -> Result<Theme, String> {
     if file.term.palette.len() != 16 {
         return Err(format!("palette needs 16 colors, got {}", file.term.palette.len()));
     }
@@ -127,12 +138,10 @@ paned > separator {{ background-color: {border}; }}
 "
     );
 
-    Ok(Theme {
-        name: file.name,
-        dark: matches!(file.kind, Kind::Dark),
-        css,
-        colors,
-    })
+    if file.name.trim().is_empty() {
+        return Err("a theme needs a name".into());
+    }
+    Ok(Theme { name: file.name.clone(), dark: matches!(file.kind, Kind::Dark), css, colors, file, path: None })
 }
 
 fn parse(text: &str, src: &str) -> Option<Theme> {
@@ -176,7 +185,8 @@ pub fn load(dir: &Path) -> Vec<Theme> {
         let src = path.display().to_string();
         match std::fs::read_to_string(&path) {
             Ok(text) => {
-                if let Some(t) = parse(&text, &src) {
+                if let Some(mut t) = parse(&text, &src) {
+                    t.path = Some(path.clone());
                     add(&mut list, t);
                 }
             }
@@ -184,6 +194,26 @@ pub fn load(dir: &Path) -> Vec<Theme> {
         }
     }
     list
+}
+
+/// File name for a user theme called `name`.
+fn file_name(name: &str) -> String {
+    let s: String = name.chars().map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let s = s.trim_matches('-').to_string();
+    format!("{}.json", if s.is_empty() { "theme" } else { &s })
+}
+
+/// Writes a user theme; returns its path. `old` is the file it replaces.
+pub fn save(dir: &Path, file: &ThemeFile, old: Option<&Path>) -> Result<PathBuf, String> {
+    build(file.clone())?;
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let path = dir.join(file_name(&file.name));
+    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
+    fs::write(&path, text + "\n").map_err(|e| e.to_string())?;
+    if let Some(o) = old.filter(|o| *o != path) {
+        let _ = fs::remove_file(o);
+    }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -196,6 +226,28 @@ mod tests {
             let file: ThemeFile = serde_json::from_str(text).expect("json");
             build(file).expect("theme");
         }
+    }
+
+    #[test]
+    fn user_theme_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("tv-theme-{}", std::process::id()));
+        let mut f: ThemeFile = serde_json::from_str(BUILTIN[0]).expect("json");
+        f.name = "My Prod/Red".into();
+        f.ui.accent = "#ff0000".into();
+        let p = save(&dir, &f, None).expect("save");
+        assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("my-prod-red.json"));
+        let list = load(&dir);
+        let t = list.iter().find(|t| t.name == "My Prod/Red").expect("loaded");
+        assert_eq!(t.file, f);
+        assert_eq!(t.path.as_deref(), Some(p.as_path()));
+        assert!(list.iter().filter(|t| t.path.is_none()).count() == BUILTIN.len());
+        // Renaming replaces the old file.
+        f.name = "Other".into();
+        let q = save(&dir, &f, Some(&p)).expect("save");
+        assert!(!p.exists() && q.exists());
+        f.term.fg = "nope".into();
+        assert!(save(&dir, &f, None).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

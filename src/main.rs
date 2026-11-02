@@ -9,6 +9,7 @@ mod dock;
 mod editor;
 mod files;
 mod ftp;
+mod keybindings;
 mod keyring;
 mod httpd;
 mod keys;
@@ -21,6 +22,7 @@ mod mav;
 mod modem;
 mod multi;
 mod palette;
+mod prefs;
 mod pty;
 mod pane;
 mod net;
@@ -41,6 +43,7 @@ mod status;
 mod store;
 mod term;
 mod theme;
+mod themeedit;
 mod transfers;
 mod usb;
 mod usbdecode;
@@ -116,9 +119,7 @@ fn main() -> glib::ExitCode {
         for e in output::set_rules(&output::load_rules()) {
             warn(&format!("highlight rule skipped: {e}"));
         }
-        for (action, keys) in window::ACCELS {
-            app.set_accels_for_action(action, keys);
-        }
+        keybindings::apply(app, &keybindings::load());
         watchdog::start();
     });
 
