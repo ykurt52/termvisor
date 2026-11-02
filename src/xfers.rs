@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use gtk::{glib, prelude::*};
@@ -32,7 +34,10 @@ pub struct Item {
     pub id: u64,
     pub name: String,
     pub dir: Dir,
-    spec: Spec,
+    /// Queue jobs keep their spec for Retry; external jobs have none.
+    spec: Option<Spec>,
+    /// Cancel flag of an external job (e.g. a serial ZMODEM transfer).
+    stop: Option<Arc<AtomicBool>>,
     pub total: u64,
     pub done: u64,
     pub run: Run,
@@ -71,6 +76,8 @@ type Listener = Box<dyn Fn(u64)>;
 
 pub struct Xfers {
     queue: Queue,
+    /// Ids for external rows, far above queue ids.
+    external_id: RefCell<u64>,
     items: RefCell<Vec<Item>>,
     /// Called with an item id, or 0 when the whole list changed.
     listeners: RefCell<Vec<Listener>>,
@@ -79,7 +86,12 @@ pub struct Xfers {
 impl Xfers {
     pub fn new() -> Rc<Self> {
         let (queue, rx) = Queue::start();
-        let x = Rc::new(Self { queue, items: RefCell::default(), listeners: RefCell::default() });
+        let x = Rc::new(Self {
+            queue,
+            external_id: RefCell::new(1 << 40),
+            items: RefCell::default(),
+            listeners: RefCell::default(),
+        });
         let weak = Rc::downgrade(&x);
         glib::spawn_future_local(async move {
             while let Ok(u) = rx.recv().await {
@@ -142,7 +154,7 @@ impl Xfers {
         };
         let spec = Spec { local, remote, cmd, force };
         let id = self.queue.add(dir, spec.local.clone(), spec.remote.clone(), spec.cmd.clone(), force);
-        let it = Item { id, name, dir, spec, total: 0, done: 0, run: Run::Queued, started: Instant::now() };
+        let it = Item { id, name, dir, spec: Some(spec), stop: None, total: 0, done: 0, run: Run::Queued, started: Instant::now() };
         self.items.borrow_mut().push(it);
         self.notify(id);
     }
@@ -152,7 +164,7 @@ impl Xfers {
         {
             let mut items = self.items.borrow_mut();
             let Some(it) = items.iter_mut().find(|i| i.id == id && matches!(i.run, Run::Failed(_))) else { return };
-            let s = it.spec.clone();
+            let Some(s) = it.spec.clone() else { return };
             it.id = self.queue.add(it.dir, s.local, s.remote, s.cmd, s.force);
             it.run = Run::Queued;
             it.done = 0;
@@ -171,7 +183,53 @@ impl Xfers {
     }
 
     pub fn cancel(&self, id: u64) {
-        self.queue.cancel(id);
+        let stop = self.items.borrow().iter().find(|i| i.id == id).and_then(|i| i.stop.clone());
+        match stop {
+            Some(flag) => flag.store(true, Ordering::Relaxed),
+            None => self.queue.cancel(id),
+        }
+    }
+
+    /// Adds a row for a transfer run outside the queue; `stop` is set by
+    /// the row's cancel button. Returns the row id.
+    pub fn external(&self, dir: Dir, name: &str, stop: Arc<AtomicBool>) -> u64 {
+        let id = {
+            let mut n = self.external_id.borrow_mut();
+            *n += 1;
+            *n
+        };
+        let it = Item {
+            id,
+            name: name.to_string(),
+            dir,
+            spec: None,
+            stop: Some(stop),
+            total: 0,
+            done: 0,
+            run: Run::Running,
+            started: Instant::now(),
+        };
+        self.items.borrow_mut().push(it);
+        self.notify(id);
+        id
+    }
+
+    pub fn progress(&self, id: u64, done: u64, total: u64) {
+        if let Some(it) = self.items.borrow_mut().iter_mut().find(|i| i.id == id) {
+            it.done = done;
+            it.total = total.max(done);
+        }
+        self.notify(id);
+    }
+
+    pub fn finish(&self, id: u64, res: Result<String, String>) {
+        if let Some(it) = self.items.borrow_mut().iter_mut().find(|i| i.id == id) {
+            it.run = match res {
+                Ok(m) => Run::Done(m),
+                Err(e) => Run::Failed(e),
+            };
+        }
+        self.notify(id);
     }
 
     pub fn set_conflict(&self, c: Conflict) {
@@ -254,7 +312,7 @@ fn paint(r: &Row, it: &Item) {
     r.info.set_text(&it.text());
     r.info.set_tooltip_text(Some(&it.text()));
     r.cancel.set_visible(!it.finished());
-    r.retry.set_visible(matches!(it.run, Run::Failed(_)));
+    r.retry.set_visible(matches!(it.run, Run::Failed(_)) && it.spec.is_some());
     match &it.run {
         Run::Failed(_) => r.info.add_css_class("tint-red"),
         _ => r.info.remove_css_class("tint-red"),

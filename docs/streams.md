@@ -71,6 +71,37 @@ Typical PX4 / ArduPilot links:
 Sending MAVLink messages is not built in; raw frames can be sent from the
 send bar in Hex mode.
 
+## File transfer (XMODEM, YMODEM, ZMODEM)
+
+Toolbar → send-file button, on serial, TCP and telnet panes:
+
+| Menu | What happens |
+|---|---|
+| Send with XMODEM / XMODEM-1K… | One file. Waits up to 60 s for the receiver's `C` (CRC) or NAK (checksum); 1K blocks need CRC |
+| Send with YMODEM… | One or more files with name, size and time |
+| Send with ZMODEM… | One or more files, fastest, the receiver may resume |
+| Receive with XMODEM… | Asks where to save. XMODEM sends no size, so the last block's `0x1A` padding stays in the file |
+| Receive with YMODEM / ZMODEM | Saves into `~/Downloads`; existing names get ` (1)`. ZMODEM writes `<name>.part` and resumes it next time |
+| Cancel Transfer | Sends the cancel sequence and stops (also the row's stop button in Transfers) |
+
+While a transfer runs, incoming bytes go to the transfer instead of the
+screen and typing is paused. Progress, speed and the result show in
+**Transfers**; the pane prints a line when it ends.
+
+**ZMODEM auto-start**: typing `sz file` on the remote side starts a
+download into `~/Downloads` by itself; typing `rz` opens a file chooser
+and sends the chosen files (closing the chooser cancels the remote `rz`).
+
+U-Boot over serial:
+
+```
+=> loady 0x42000000        # then Send with YMODEM… (exact size, no padding)
+=> loadx 0x42000000        # then Send with XMODEM-1K…
+```
+
+Tested against lrzsz (`sx`, `rx`, `sb`, `rb`, `sz`, `rz`), including
+ZMODEM through a serial pty and ZMODEM resume.
+
 ## Telnet
 
 Built-in client, no `telnet` package needed. It accepts the server's ECHO

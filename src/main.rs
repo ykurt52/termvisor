@@ -8,6 +8,7 @@ mod ftp;
 mod keyring;
 mod link;
 mod mav;
+mod modem;
 mod palette;
 mod pane;
 mod net;

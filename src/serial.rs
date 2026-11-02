@@ -264,6 +264,10 @@ impl Conn {
         let _ = self.cmds.send(Cmd::Break);
     }
 
+    pub fn sink(&self) -> crate::link::Sink {
+        crate::link::sink(self.cmds.clone(), Cmd::Write)
+    }
+
     pub fn dtr(&self, on: bool) {
         let _ = self.cmds.send(Cmd::Dtr(on));
     }

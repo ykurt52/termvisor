@@ -11,6 +11,7 @@ Milestone 1 plus the UI shell:
 - Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`, `ftp://host`)
 - Serial, raw TCP and telnet panes: Text / Hex / MAVLink views, ASCII and hex send bar
 - Serial locking, mirror and auto-reconnect
+- XMODEM, YMODEM and ZMODEM send/receive on serial, TCP and telnet; ZMODEM auto-start and resume
 - SFTP and FTP/FTPS file panel, transfer queue with resume, edit remote files locally
 - Tabs with nested split panes, start page when no tab is open
 - Bottom dock and status bar

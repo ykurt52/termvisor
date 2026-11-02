@@ -3,6 +3,18 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Thread-safe writer into an open link (used by file transfer engines).
+pub type Sink = Box<dyn FnMut(&[u8]) -> std::io::Result<()> + Send>;
+
+fn closed() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "link closed")
+}
+
+/// Sink that forwards each chunk with `send` until it fails.
+pub fn sink<T: Send + 'static>(tx: std::sync::mpsc::Sender<T>, wrap: fn(Vec<u8>) -> T) -> Sink {
+    Box::new(move |d: &[u8]| tx.send(wrap(d.to_vec())).map_err(|_| closed()))
+}
+
 /// From an I/O thread to the pane.
 pub enum Event {
     /// Connection established, with a short description.

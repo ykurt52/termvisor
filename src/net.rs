@@ -163,6 +163,10 @@ impl Conn {
     pub fn send_break(&self) {
         let _ = self.cmds.send(Cmd::Break);
     }
+
+    pub fn sink(&self) -> crate::link::Sink {
+        crate::link::sink(self.cmds.clone(), Cmd::Write)
+    }
 }
 
 impl Drop for Conn {

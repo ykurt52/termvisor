@@ -70,5 +70,5 @@ Missing fields take the defaults shown.
 
 ## Not yet
 
-XMODEM/YMODEM/ZMODEM (milestone 8), per-line timestamps and logging
-(milestone 9).
+Per-line timestamps and logging (milestone 9). File transfer with
+XMODEM/YMODEM/ZMODEM: see [streams.md](streams.md).

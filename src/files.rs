@@ -274,7 +274,7 @@ fn uri_path(uri: &str) -> Option<String> {
     glib::Uri::unescape_string(&rest[i..], None::<&str>).map(|s| s.to_string())
 }
 
-fn downloads_dir() -> PathBuf {
+pub fn downloads_dir() -> PathBuf {
     glib::user_special_dir(glib::UserDirectory::Downloads).unwrap_or_else(glib::home_dir)
 }
 

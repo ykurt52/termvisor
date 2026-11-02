@@ -6,15 +6,23 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use gtk::{gdk, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use vte::prelude::*;
 
 use crate::link::{self, Eol, Event, Hex, View};
+use crate::files::downloads_dir;
 use crate::mav::Decoder;
+use crate::modem::{self, ChanWire, Ctl, Outgoing, Proto};
+use crate::transfers::Dir;
+use crate::xfers::Xfers;
 use crate::state::State;
 use crate::term::{self, Launch, Stream};
 use crate::{net, serial};
@@ -51,6 +59,13 @@ impl Link {
             c.rts(on);
         }
     }
+
+    fn sink(&self) -> link::Sink {
+        match self {
+            Link::Serial(c) => c.sink(),
+            Link::Net(c) => c.sink(),
+        }
+    }
 }
 
 fn open_link(src: &Stream) -> Result<(Link, async_channel::Receiver<Event>), String> {
@@ -76,6 +91,15 @@ struct Pane {
     retry: RefCell<Option<glib::SourceId>>,
     /// Last status note, to avoid repeating the same line on every retry.
     last_note: RefCell<String>,
+    xfers: Rc<Xfers>,
+    /// While a file transfer runs, incoming bytes go here, not to the screen.
+    xfer: RefCell<Option<mpsc::Sender<Vec<u8>>>>,
+    /// Cancel flag of the running transfer.
+    stop: RefCell<Option<Arc<AtomicBool>>>,
+    /// Last bytes seen, so a ZMODEM start split across reads is found.
+    tail: RefCell<Vec<u8>>,
+    /// A "remote rz wants a file" dialog is open.
+    asking: Cell<bool>,
 }
 
 /// Owner and mirrors per serial device path.
@@ -206,6 +230,13 @@ fn connect(p: &Rc<Pane>) {
                             p.note("32", &msg);
                         }
                         Event::Data(d) => {
+                            if let Some(tx) = p.xfer.borrow().as_ref() {
+                                let _ = tx.send(d);
+                                continue;
+                            }
+                            if !p.mirror && autodetect(&p, &d) {
+                                continue;
+                            }
                             p.show(&d);
                             for m in mirrors(&p.src) {
                                 m.show(&d);
@@ -213,6 +244,8 @@ fn connect(p: &Rc<Pane>) {
                         }
                         Event::Closed(why) => {
                             p.link.take();
+                            // Ends a running transfer: its wire reports "link closed".
+                            p.xfer.take();
                             p.set_up(false);
                             p.note("33", &format!("disconnected: {why}"));
                             if p.src.opts().reconnect {
@@ -233,6 +266,261 @@ fn connect(p: &Rc<Pane>) {
             }
         }
     }
+}
+
+/// A file transfer for the transfer engines in `modem`.
+enum Job {
+    Send(Proto, Vec<PathBuf>),
+    /// XMODEM has no file name: receive into this file.
+    RecvFile(Proto, PathBuf),
+    /// YMODEM and ZMODEM receive named files into this folder.
+    RecvDir(Proto, PathBuf),
+}
+
+enum Msg {
+    Progress(u64, u64),
+    Done(Result<String, String>),
+}
+
+fn proto_of(s: &str) -> Option<Proto> {
+    match s {
+        "xmodem" => Some(Proto::Xmodem),
+        "xmodem1k" => Some(Proto::Xmodem1k),
+        "ymodem" => Some(Proto::Ymodem),
+        "zmodem" => Some(Proto::Zmodem),
+        _ => None,
+    }
+}
+
+fn run_job(job: &Job, w: &mut ChanWire, ctl: &mut Ctl) -> Result<String, String> {
+    let size = |n: u64| glib::format_size(n).to_string();
+    match job {
+        Job::Send(proto, paths) => {
+            let files: Vec<Outgoing> = paths.iter().map(|p| Outgoing { path: p.clone() }).collect();
+            let n = match proto {
+                Proto::Xmodem | Proto::Xmodem1k => {
+                    let f = files.first().ok_or("no file")?;
+                    modem::xmodem_send(w, f, *proto == Proto::Xmodem1k, ctl)?
+                }
+                Proto::Ymodem => modem::ymodem_send(w, &files, ctl)?,
+                Proto::Zmodem => modem::zmodem_send(w, &files, ctl)?,
+            };
+            Ok(format!("sent {} with {}", size(n), proto.label()))
+        }
+        Job::RecvFile(proto, path) => {
+            let mut f = File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let n = modem::xmodem_recv(w, &mut f, &name, ctl)?;
+            Ok(format!("received {} with {} into {}", size(n), proto.label(), path.display()))
+        }
+        Job::RecvDir(proto, dir) => {
+            let saved = match proto {
+                Proto::Ymodem => modem::ymodem_recv(w, dir, ctl)?,
+                _ => modem::zmodem_recv(w, dir, ctl)?,
+            };
+            Ok(format!("received {} file(s) with {} into {}", saved.len(), proto.label(), dir.display()))
+        }
+    }
+}
+
+/// Starts `job` on a worker thread, with a row in Transfers.
+fn start(p: &Rc<Pane>, job: Job) {
+    if p.xfer.borrow().is_some() {
+        p.note("33", "a file transfer is already running");
+        return;
+    }
+    let Some(sink) = p.link.borrow().as_ref().map(Link::sink) else {
+        p.note("33", "not connected");
+        return;
+    };
+    let (dir, label) = match &job {
+        Job::Send(proto, paths) => {
+            let names: Vec<String> = paths
+                .iter()
+                .filter_map(|x| x.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+            (Dir::Up, format!("{} {}", proto.label(), names.join(", ")))
+        }
+        Job::RecvFile(proto, path) => (Dir::Down, format!("{} {}", proto.label(), path.display())),
+        Job::RecvDir(proto, dir) => (Dir::Down, format!("{} into {}", proto.label(), dir.display())),
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let id = p.xfers.external(dir, &label, stop.clone());
+    let (tx, rx) = mpsc::channel();
+    p.xfer.replace(Some(tx));
+    p.stop.replace(Some(stop.clone()));
+    p.note("36", &format!("{label}: started; Transfers shows progress"));
+
+    let (mtx, mrx) = async_channel::unbounded::<Msg>();
+    let spawned = thread::Builder::new().name("modem".into()).spawn(move || {
+        let mut w = ChanWire { rx, tx: sink };
+        let mut last = Instant::now();
+        let ptx = mtx.clone();
+        let mut prog = |_: &str, done: u64, total: u64| {
+            if last.elapsed() >= Duration::from_millis(100) {
+                last = Instant::now();
+                let _ = ptx.send_blocking(Msg::Progress(done, total));
+            }
+        };
+        let mut ctl = Ctl { cancel: &stop, progress: &mut prog };
+        let res = run_job(&job, &mut w, &mut ctl);
+        let _ = mtx.send_blocking(Msg::Done(res));
+    });
+    if spawned.is_err() {
+        p.xfer.take();
+        p.xfers.finish(id, Err("cannot start worker".into()));
+        return;
+    }
+    let weak = Rc::downgrade(p);
+    glib::spawn_future_local(async move {
+        while let Ok(m) = mrx.recv().await {
+            let Some(p) = weak.upgrade() else { break };
+            match m {
+                Msg::Progress(done, total) => p.xfers.progress(id, done, total),
+                Msg::Done(res) => {
+                    p.xfer.take();
+                    p.stop.take();
+                    p.last_note.replace(String::new());
+                    match &res {
+                        Ok(msg) => p.note("32", msg),
+                        Err(e) => p.note("31", &format!("transfer failed: {e}")),
+                    }
+                    p.xfers.finish(id, res);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn window_of(p: &Pane) -> Option<gtk::Window> {
+    p.term.upgrade().and_then(|t| t.root()).and_downcast::<gtk::Window>()
+}
+
+/// Asks for files and sends them with `proto`. `abort_on_cancel` sends the
+/// cancel sequence when the dialog is dismissed (a remote rz is waiting).
+fn pick_and_send(p: &Rc<Pane>, proto: Proto, abort_on_cancel: bool) {
+    let win = window_of(p);
+    let pp = p.clone();
+    let done = move |paths: Option<Vec<PathBuf>>| {
+        pp.asking.set(false);
+        match paths.filter(|v| !v.is_empty()) {
+            Some(v) => start(&pp, Job::Send(proto, v)),
+            None if abort_on_cancel => {
+                if let Some(l) = pp.link.borrow().as_ref() {
+                    l.write([0x18u8; 10].to_vec());
+                }
+            }
+            None => {}
+        }
+    };
+    let dlg = gtk::FileDialog::new();
+    dlg.set_title(&format!("Send with {}", proto.label()));
+    if matches!(proto, Proto::Xmodem | Proto::Xmodem1k) {
+        dlg.open(win.as_ref(), None::<&gio::Cancellable>, move |r| done(r.ok().and_then(|f| f.path()).map(|p| vec![p])));
+    } else {
+        dlg.open_multiple(win.as_ref(), None::<&gio::Cancellable>, move |r| {
+            done(r.ok().map(|l| {
+                (0..l.n_items())
+                    .filter_map(|i| l.item(i).and_downcast::<gio::File>())
+                    .filter_map(|f| f.path())
+                    .collect()
+            }))
+        });
+    }
+}
+
+fn receive(p: &Rc<Pane>, proto: Proto) {
+    if !matches!(proto, Proto::Xmodem | Proto::Xmodem1k) {
+        start(p, Job::RecvDir(proto, downloads_dir()));
+        return;
+    }
+    let pp = p.clone();
+    let dlg = gtk::FileDialog::new();
+    dlg.set_title("Save XMODEM Download As");
+    dlg.set_initial_name(Some("received.bin"));
+    dlg.save(window_of(p).as_ref(), None::<&gio::Cancellable>, move |r| {
+        if let Some(path) = r.ok().and_then(|f| f.path()) {
+            start(&pp, Job::RecvFile(proto, path));
+        }
+    });
+}
+
+/// Starts ZMODEM by itself when the other side runs `sz` (receive into
+/// Downloads) or `rz` (ask what to send). Returns true when it took the data.
+fn autodetect(p: &Rc<Pane>, data: &[u8]) -> bool {
+    let mut probe = std::mem::take(&mut *p.tail.borrow_mut());
+    probe.extend_from_slice(data);
+    let keep = probe.len().saturating_sub(5);
+    p.tail.replace(probe[keep..].to_vec());
+    if modem::sz_started(&probe) {
+        p.tail.borrow_mut().clear();
+        start(p, Job::RecvDir(Proto::Zmodem, downloads_dir()));
+        if let Some(tx) = p.xfer.borrow().as_ref() {
+            let _ = tx.send(data.to_vec());
+        }
+        return true;
+    }
+    if modem::rz_started(&probe) && !p.asking.get() {
+        p.tail.borrow_mut().clear();
+        p.asking.set(true);
+        p.show(data);
+        pick_and_send(p, Proto::Zmodem, true);
+        return true;
+    }
+    false
+}
+
+fn transfer_menu() -> gio::Menu {
+    let item = |label: &str, action: &str, target: &str| {
+        let i = gio::MenuItem::new(Some(label), None);
+        i.set_action_and_target_value(Some(action), Some(&target.to_variant()));
+        i
+    };
+    let send = gio::Menu::new();
+    for (l, t) in [("Send with XMODEM…", "xmodem"), ("Send with XMODEM-1K…", "xmodem1k"), ("Send with YMODEM…", "ymodem"), ("Send with ZMODEM…", "zmodem")] {
+        send.append_item(&item(l, "pane.send", t));
+    }
+    let recv = gio::Menu::new();
+    for (l, t) in [("Receive with XMODEM…", "xmodem"), ("Receive with YMODEM", "ymodem"), ("Receive with ZMODEM", "zmodem")] {
+        recv.append_item(&item(l, "pane.receive", t));
+    }
+    let stop = gio::Menu::new();
+    stop.append(Some("Cancel Transfer"), Some("pane.cancel"));
+    let m = gio::Menu::new();
+    m.append_section(None, &send);
+    m.append_section(None, &recv);
+    m.append_section(None, &stop);
+    m
+}
+
+fn pane_actions(p: &Rc<Pane>) -> gio::SimpleActionGroup {
+    let g = gio::SimpleActionGroup::new();
+    let a = gio::SimpleAction::new("send", Some(glib::VariantTy::STRING));
+    let pp = p.clone();
+    a.connect_activate(move |_, v| {
+        if let Some(proto) = v.and_then(|v| v.get::<String>()).and_then(|s| proto_of(&s)) {
+            pick_and_send(&pp, proto, false);
+        }
+    });
+    g.add_action(&a);
+    let a = gio::SimpleAction::new("receive", Some(glib::VariantTy::STRING));
+    let pp = p.clone();
+    a.connect_activate(move |_, v| {
+        if let Some(proto) = v.and_then(|v| v.get::<String>()).and_then(|s| proto_of(&s)) {
+            receive(&pp, proto);
+        }
+    });
+    g.add_action(&a);
+    let a = gio::SimpleAction::new("cancel", None);
+    let pp = p.clone();
+    a.connect_activate(move |_, _| {
+        if let Some(stop) = pp.stop.borrow().as_ref() {
+            stop.store(true, Ordering::Relaxed);
+        }
+    });
+    g.add_action(&a);
+    g
 }
 
 /// Serial: poll every 500 ms until the device is back. Network: try again
@@ -435,6 +723,11 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
         stats: stats.clone(),
         retry: RefCell::new(None),
         last_note: RefCell::new(String::new()),
+        xfers: state.xfers.clone(),
+        xfer: RefCell::new(None),
+        stop: RefCell::new(None),
+        tail: RefCell::new(Vec::new()),
+        asking: Cell::new(false),
     });
     stats.set_visible(p.view.get() == View::Mavlink);
 
@@ -457,6 +750,11 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
     let brk = gtk::Button::with_label("Break");
     brk.add_css_class("flat");
     brk.set_tooltip_text(Some(if serial { "Send a 250 ms break" } else { "Send telnet BREAK" }));
+    let files = gtk::MenuButton::new();
+    files.set_icon_name("document-send-symbolic");
+    files.add_css_class("flat");
+    files.set_tooltip_text(Some("Send or receive files (XMODEM, YMODEM, ZMODEM)"));
+    files.set_menu_model(Some(&transfer_menu()));
     let again = button("view-refresh-symbolic", "Reconnect");
     let clear = button("edit-clear-symbolic", "Clear screen and scrollback");
 
@@ -474,6 +772,7 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
         dtr.upcast_ref(),
         rts.upcast_ref(),
         brk.upcast_ref(),
+        files.upcast_ref(),
         again.upcast_ref(),
         clear.upcast_ref(),
     ] {
@@ -482,7 +781,7 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
     dtr.set_visible(serial && !mirror);
     rts.set_visible(serial && !mirror);
     brk.set_visible(!mirror && !matches!(p.src, Stream::Tcp(_)));
-    for w in [echo.upcast_ref::<gtk::Widget>(), eol.upcast_ref(), again.upcast_ref()] {
+    for w in [echo.upcast_ref::<gtk::Widget>(), eol.upcast_ref(), again.upcast_ref(), files.upcast_ref()] {
         w.set_visible(!mirror);
     }
 
@@ -542,12 +841,20 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
     // Typed text goes to the link.
     let pp = p.clone();
     t.connect_commit(move |_, text, _| {
+        if pp.xfer.borrow().is_some() {
+            pp.note("33", "file transfer running; typing is paused");
+            return;
+        }
         pp.send(link::outgoing(text, pp.eol.get()), &link::echo(text));
     });
 
     // Closing the pane drops the link and tells the mirrors.
     let pp = p.clone();
     t.connect_destroy(move |_| {
+        if let Some(stop) = pp.stop.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
+        pp.xfer.take();
         pp.link.take();
         if let Some(id) = pp.retry.take() {
             id.remove();
@@ -589,6 +896,7 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
     }
 
     let leaf = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    leaf.insert_action_group("pane", Some(&pane_actions(&p)));
     leaf.append(&bar);
     leaf.append(&term::scroll(&t));
     if !mirror {

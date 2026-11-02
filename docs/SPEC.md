@@ -254,7 +254,7 @@ Arch containers, release packages on tag.
 6. Telnet, Raw TCP, Mosh; binary send bar, hex+ASCII view, MAVLink decoder.
 7. File browser and transfer queue: 7a SFTP browser + queue, 7b FTP/FTPS,
    remote edit, follow cwd, resume (dual pane left for later).
-8. XMODEM / YMODEM / ZMODEM.
+8. XMODEM / YMODEM / ZMODEM (ZMODEM via the zmodem2 crate, resume, auto-start).
 9. Command panel, highlight rules, timestamps, logging.
 10. Tunnels, multi-exec, macros.
 11. Tools: TFTP, HTTP server, scanner, ping, WOL.
