@@ -16,6 +16,7 @@ use crate::link::StreamOpts;
 use crate::net::NetCfg;
 use crate::serial::SerialCfg;
 use crate::state::State;
+use crate::{output, pty};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -192,7 +193,7 @@ pub fn cwd(term: &vte::Terminal) -> Option<String> {
 
 /// Creates a terminal and starts `launch` in it.
 pub fn spawn(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
-    let term = vte::Terminal::new();
+    let term: vte::Terminal = pty::Term::default().upcast();
     term.set_hexpand(true);
     term.set_vexpand(true);
     term.set_mouse_autohide(true);
@@ -203,6 +204,10 @@ pub fn spawn(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
         term.set_font(Some(&pango::FontDescription::from_string(&cfg.font)));
     }
     state.track(&term, launch);
+    // Stream panes set up their own pipeline.
+    if launch.stream.is_none() {
+        output::attach(&term, &launch.title, &state.cfg.borrow());
+    }
     let st = Rc::downgrade(state);
     term.connect_current_directory_uri_changed(move |t| {
         if let Some(s) = st.upgrade() {
@@ -257,39 +262,29 @@ fn command(launch: &Launch) -> (Vec<String>, Vec<String>) {
     (argv, env)
 }
 
-/// Starts (or restarts) the child process of `term`.
+/// Starts (or restarts) the child process of `term` on its own pty.
 pub fn run(term: &vte::Terminal, launch: &Launch) {
     // Stream panes have no child process; the stream pane feeds them.
     if launch.stream.is_some() {
         return;
     }
-    let (full, env) = command(launch);
-    let argv: Vec<&str> = full.iter().map(String::as_str).collect();
-    let envv: Vec<&str> = env.iter().map(String::as_str).collect();
+    let (Some(t), Some(out)) = (term.downcast_ref::<pty::Term>(), output::of(term)) else {
+        crate::warn("terminal without pty support");
+        return;
+    };
+    let (argv, env) = command(launch);
+    let env: Vec<(String, String)> =
+        env.iter().filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let dir = launch
         .dir
         .clone()
+        .filter(|d| Path::new(d).is_dir())
         .unwrap_or_else(|| glib::home_dir().to_string_lossy().into_owned());
-    let weak = term.downgrade();
-    let name = launch.argv.first().cloned().unwrap_or_default();
-    term.spawn_async(
-        vte::PtyFlags::DEFAULT,
-        Some(&dir),
-        &argv,
-        &envv,
-        glib::SpawnFlags::SEARCH_PATH,
-        || {},
-        -1,
-        None::<&gio::Cancellable>,
-        move |res| {
-            if let Err(e) = res {
-                crate::warn(&format!("spawn {name}: {e}"));
-                if let Some(t) = weak.upgrade() {
-                    t.feed(format!("\r\nfailed to start {name}: {e}\r\n").as_bytes());
-                }
-            }
-        },
-    );
+    if let Err(e) = t.start(&argv, &env, &dir, out) {
+        let name = argv.first().cloned().unwrap_or_default();
+        crate::warn(&format!("spawn {name}: {e}"));
+        term.feed(format!("\r\nfailed to start {name}: {e}\r\n").as_bytes());
+    }
 }
 
 /// Wraps a terminal in a scrolled window.

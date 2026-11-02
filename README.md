@@ -14,6 +14,8 @@ Milestone 1 plus the UI shell:
 - XMODEM, YMODEM and ZMODEM send/receive on serial, TCP and telnet; ZMODEM auto-start and resume
 - SFTP and FTP/FTPS file panel, transfer queue with resume, edit remote files locally
 - Tabs with nested split panes, start page when no tab is open
+- Command panel: pages of up to 50 buttons that send text or hex to the focused pane
+- Timestamps, regex highlight rules and logging to file in every pane
 - Bottom dock and status bar
 - Live theme switching
 
@@ -42,6 +44,27 @@ cargo build --release
 ./target/release/termvisor
 ```
 
+## Performance
+
+`cargo run` builds a debug binary; use `cargo run --release` (or the
+packaged build) for daily use.
+
+Inside a VM without 3D acceleration OpenGL is software (llvmpipe) and GTK's
+default renderer is slow. With `"renderer": "auto"` (default in
+`settings.json`) termvisor detects this and uses the cairo renderer instead.
+Measured on a VMware VM while the terminal scrolls:
+
+| Setup | fps |
+|---|---|
+| GTK default renderer (ngl), debug build | 13 |
+| `auto` → cairo, debug build | 50 |
+| `auto` → cairo, release build | 58 |
+
+Force a renderer with `"renderer": "cairo" | "gl" | "ngl" | "vulkan"`, or
+the `GSK_RENDERER` environment variable (always wins). Enabling 3D
+acceleration in the VM settings gives hardware OpenGL; `auto` then keeps
+GTK's GPU renderer.
+
 ## Shortcuts
 
 | Action | Keys |
@@ -67,14 +90,19 @@ SSH prompts, connection sharing and the keyring: [docs/ssh.md](docs/ssh.md).
 Serial ports, locking, mirror and reconnect: [docs/serial.md](docs/serial.md).
 TCP, telnet, hex and MAVLink views, send bar: [docs/streams.md](docs/streams.md).
 File browser and transfers: [docs/files.md](docs/files.md).
+Command buttons: [docs/commands.md](docs/commands.md).
+Timestamps, highlight, logging: [docs/output.md](docs/output.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 
 ## Files
 
 | Path | Content |
 |---|---|
-| `~/.config/termvisor/settings.json` | Theme, font, scrollback, restore tabs |
+| `~/.config/termvisor/settings.json` | Theme, font, scrollback, restore tabs, renderer, pane output defaults |
 | `~/.config/termvisor/sessions.toml` | Saved sessions, see [docs/sessions.md](docs/sessions.md) |
+| `~/.config/termvisor/commands.toml` | Command panel pages, see [docs/commands.md](docs/commands.md) |
+| `~/.config/termvisor/highlight.toml` | Highlight rules, see [docs/output.md](docs/output.md) |
+| `~/.local/share/termvisor/logs/` | Session logs |
 | `~/.local/state/termvisor/recent.json`, `tabs.json` | Recent sessions, saved tabs |
 | `~/.config/termvisor/themes/*.json` | User themes, see [docs/themes.md](docs/themes.md) |
 

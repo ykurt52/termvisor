@@ -1274,6 +1274,7 @@ dependencies = [
  "libc",
  "libsecret",
  "mavlink",
+ "regex",
  "serde",
  "serde_json",
  "serialport",

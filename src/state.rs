@@ -6,6 +6,7 @@ use std::rc::Rc;
 use gtk::{gdk, glib, prelude::*};
 use vte::prelude::*;
 
+use crate::commands::{self, Page};
 use crate::recent::{self, Recent};
 use crate::settings::{self, Settings};
 use crate::store::Store;
@@ -22,6 +23,9 @@ pub struct State {
     pub recent: RefCell<Vec<Recent>>,
     /// Transfer queue and list, shared by all windows.
     pub xfers: Rc<Xfers>,
+    /// Command panel pages, shared by all windows.
+    pub commands: RefCell<Vec<Page>>,
+    cmd_listeners: RefCell<Vec<Box<dyn Fn()>>>,
     listeners: RefCell<Vec<Box<dyn Fn()>>>,
     /// Called when a terminal's shell reports a new directory (OSC 7).
     cwd_listeners: RefCell<Vec<TermFn>>,
@@ -51,6 +55,8 @@ impl State {
             store: RefCell::new(Store::load()),
             recent: RefCell::new(recent::load(recent::RECENT)),
             xfers: Xfers::new(),
+            commands: RefCell::new(commands::load()),
+            cmd_listeners: RefCell::new(Vec::new()),
             listeners: RefCell::new(Vec::new()),
             notice: RefCell::new(None),
             cwd_listeners: RefCell::new(Vec::new()),
@@ -111,6 +117,21 @@ impl State {
         for f in self.listeners.borrow().iter() {
             f();
         }
+    }
+
+    /// Calls `f` whenever command pages change.
+    pub fn on_commands(&self, f: impl Fn() + 'static) {
+        self.cmd_listeners.borrow_mut().push(Box::new(f));
+    }
+
+    /// Applies `f` to the command pages, saves and notifies listeners.
+    pub fn edit_commands(&self, f: impl FnOnce(&mut Vec<Page>)) -> Result<(), String> {
+        f(&mut self.commands.borrow_mut());
+        let saved = commands::save(&self.commands.borrow()).map_err(|e| format!("save commands: {e}"));
+        for f in self.cmd_listeners.borrow().iter() {
+            f();
+        }
+        saved
     }
 
     pub fn set_restore(&self, on: bool) {

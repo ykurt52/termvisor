@@ -1,19 +1,25 @@
 // termvisor entry point.
 
 mod askpass;
+mod cmdpanel;
+mod commands;
 mod dock;
 mod editor;
 mod files;
 mod ftp;
 mod keyring;
 mod link;
+mod logpanel;
 mod mav;
 mod modem;
 mod palette;
+mod pty;
 mod pane;
 mod net;
+mod output;
 mod recent;
 mod recover;
+mod render;
 mod remote;
 mod sessions;
 mod serial;
@@ -74,9 +80,15 @@ fn main() -> glib::ExitCode {
 
     app.connect_startup(|app| {
         if let Some(d) = gdk::Display::default() {
+            if let Some(why) = render::choose(&d, &settings::Settings::load().renderer) {
+                glib::g_info!("termvisor", "renderer: {}", why);
+            }
             gtk::IconTheme::for_display(&d).add_resource_path("/io/github/ykurt52/termvisor/icons");
         }
         gtk::Window::set_default_icon_name(APP_ID);
+        for e in output::set_rules(&output::load_rules()) {
+            warn(&format!("highlight rule skipped: {e}"));
+        }
         for (action, keys) in window::ACCELS {
             app.set_accels_for_action(action, keys);
         }

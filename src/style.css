@@ -186,3 +186,32 @@ tabbar tab:selected {
 .bubble.tint-red { background-color: alpha(@c_red, 0.16); }
 .bubble.tint-magenta { background-color: alpha(@c_magenta, 0.16); }
 .bubble.tint-cyan { background-color: alpha(@c_cyan, 0.16); }
+
+/* Command panel */
+.cmdpanel button.cmd {
+  min-height: 24px;
+  padding: 2px 12px;
+  font-size: 0.9em;
+}
+
+.cmdpanel button.cmd-new {
+  background: transparent;
+  border: 1px dashed @borders;
+}
+
+.cmdpanel button.c-blue { background-color: alpha(@c_blue, 0.25); }
+.cmdpanel button.c-green { background-color: alpha(@c_green, 0.25); }
+.cmdpanel button.c-yellow { background-color: alpha(@c_yellow, 0.25); }
+.cmdpanel button.c-red { background-color: alpha(@c_red, 0.25); }
+.cmdpanel button.c-magenta { background-color: alpha(@c_magenta, 0.25); }
+.cmdpanel button.c-cyan { background-color: alpha(@c_cyan, 0.25); }
+.cmdpanel button.c-blue:hover { background-color: alpha(@c_blue, 0.38); }
+.cmdpanel button.c-green:hover { background-color: alpha(@c_green, 0.38); }
+.cmdpanel button.c-yellow:hover { background-color: alpha(@c_yellow, 0.38); }
+.cmdpanel button.c-red:hover { background-color: alpha(@c_red, 0.38); }
+.cmdpanel button.c-magenta:hover { background-color: alpha(@c_magenta, 0.38); }
+.cmdpanel button.c-cyan:hover { background-color: alpha(@c_cyan, 0.38); }
+
+.cmdpanel flowboxchild {
+  padding: 0;
+}

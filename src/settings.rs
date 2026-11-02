@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use gtk::glib;
 use serde::{Deserialize, Serialize};
 
+use crate::output::LogMode;
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -16,6 +18,15 @@ pub struct Settings {
     pub scrollback: i64,
     /// Reopen the last tabs on start.
     pub restore_tabs: bool,
+    /// GTK renderer: "auto" (cairo on software OpenGL), "cairo", "gl",
+    /// "ngl" or "vulkan". GSK_RENDERER in the environment wins.
+    pub renderer: String,
+    /// Defaults for new panes: per-line timestamps, highlight rules, log.
+    pub timestamps: bool,
+    pub highlight: bool,
+    pub log: LogMode,
+    /// Log folder; empty uses ~/.local/share/termvisor/logs.
+    pub log_dir: String,
 }
 
 impl Default for Settings {
@@ -25,6 +36,11 @@ impl Default for Settings {
             font: "Monospace 11".into(),
             scrollback: 10_000,
             restore_tabs: false,
+            renderer: "auto".into(),
+            timestamps: false,
+            highlight: true,
+            log: LogMode::Off,
+            log_dir: String::new(),
         }
     }
 }

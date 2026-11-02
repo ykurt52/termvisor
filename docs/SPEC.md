@@ -36,6 +36,7 @@ Code must not use APIs newer than these.
 | Mosh | System `mosh` (optional) | v1 |
 | Raw TCP | Built-in | v1 |
 | FTP / FTPS | `suppaftp` | v1 |
+| ADB | System `adb` (optional) | v1 |
 | RDP | FreeRDP | v2 |
 | VNC | gtk-vnc | v2 |
 
@@ -256,10 +257,13 @@ Arch containers, release packages on tag.
    remote edit, follow cwd, resume (dual pane left for later).
 8. XMODEM / YMODEM / ZMODEM (ZMODEM via the zmodem2 crate, resume, auto-start).
 9. Command panel, highlight rules, timestamps, logging.
-10. Tunnels, multi-exec, macros.
-11. Tools: TFTP, HTTP server, scanner, ping, WOL.
-12. Theme editor, settings UI, keybindings.
-13. Packaging and CI.
+10. ADB: device list in the sidebar (`adb devices -l`, live), `adb shell`
+    sessions per serial, logcat view with level/tag/PID filters and colors,
+    file panel over `adb push`/`pull`, reconnect on replug.
+11. Tunnels, multi-exec, macros.
+12. Tools: TFTP, HTTP server, scanner, ping, WOL.
+13. Theme editor, settings UI, keybindings.
+14. Packaging and CI.
 
 ## Backlog
 

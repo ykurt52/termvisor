@@ -56,6 +56,8 @@ struct Ui {
     view: adw::TabView,
     sidebar: Sidebar,
     dock: gtk::Box,
+    /// Last terminal that had the focus.
+    last: Rc<glib::WeakRef<vte::Terminal>>,
     status: Status,
     quick: gtk::Entry,
     toasts: adw::ToastOverlay,
@@ -69,12 +71,8 @@ impl Ui {
         self.toasts.add_toast(adw::Toast::new(msg));
     }
 
-    /// Focused terminal, else the first one in the selected tab.
     fn active(&self) -> Option<vte::Terminal> {
-        let focused = gtk::prelude::GtkWindowExt::focus(&self.win)
-            .and_then(|f| f.ancestor(vte::Terminal::static_type()))
-            .and_then(|w| w.downcast::<vte::Terminal>().ok());
-        focused.or_else(|| self.view.selected_page().and_then(|p| pane::find(&p.child())))
+        active(&self.win, &self.view, &self.last)
     }
 
     /// Opens a tab; `remember` adds it to the recent list.
@@ -285,6 +283,21 @@ impl Ui {
     }
 }
 
+/// Terminal that has the keyboard focus.
+fn focused(win: &adw::ApplicationWindow) -> Option<vte::Terminal> {
+    gtk::prelude::GtkWindowExt::focus(win)
+        .and_then(|f| f.ancestor(vte::Terminal::static_type()))
+        .and_then(|w| w.downcast::<vte::Terminal>().ok())
+}
+
+/// Focused terminal, else the last focused one in this window (the focus
+/// may be on a dock control), else the first one in the selected tab.
+fn active(win: &adw::ApplicationWindow, view: &adw::TabView, last: &glib::WeakRef<vte::Terminal>) -> Option<vte::Terminal> {
+    focused(win)
+        .or_else(|| last.upgrade().filter(|t| t.root().is_some_and(|r| &r == win.upcast_ref::<gtk::Root>())))
+        .or_else(|| view.selected_page().and_then(|p| pane::find(&p.child())))
+}
+
 fn open_tab(view: &adw::TabView, state: &Rc<State>, launch: &Launch) {
     // FTP has no terminal; the window shows it in the Files panel.
     if let Some(cfg) = &launch.ftp {
@@ -323,9 +336,10 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     main.set_visible_child_name("welcome");
 
     let dock = dock::build(state);
+    let last: Rc<glib::WeakRef<vte::Terminal>> = Rc::default();
     let vsplit = gtk::Paned::new(gtk::Orientation::Vertical);
     vsplit.set_start_child(Some(&main));
-    vsplit.set_end_child(Some(&dock));
+    vsplit.set_end_child(Some(&dock.widget));
     vsplit.set_resize_end_child(false);
     vsplit.set_shrink_end_child(false);
     vsplit.set_hexpand(true);
@@ -384,6 +398,10 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         }
     });
     let sidebar = Sidebar::new(state, open_cb.clone());
+    let (w, v, l) = (win.downgrade(), view.downgrade(), last.clone());
+    dock.commands.set_target(move || active(&w.upgrade()?, &v.upgrade()?, &l));
+    let (w, v, l) = (win.downgrade(), view.downgrade(), last.clone());
+    dock.logs.set_target(move || active(&w.upgrade()?, &v.upgrade()?, &l));
 
     let hsplit = gtk::Paned::new(gtk::Orientation::Horizontal);
     hsplit.set_start_child(Some(&sidebar.panel));
@@ -405,7 +423,8 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         win: win.clone(),
         view: view.clone(),
         sidebar,
-        dock,
+        dock: dock.widget.clone(),
+        last: last.clone(),
         status,
         quick: quick.clone(),
         toasts,
@@ -441,8 +460,16 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         }
         u.refresh_status();
     });
-    let u = ui.clone();
-    win.connect_focus_widget_notify(move |_| u.refresh_status());
+    let (u, logs) = (ui.clone(), Rc::downgrade(&dock.logs));
+    win.connect_focus_widget_notify(move |w| {
+        if let Some(t) = focused(w) {
+            u.last.set(Some(&t));
+        }
+        u.refresh_status();
+        if let Some(l) = logs.upgrade() {
+            l.sync();
+        }
+    });
 
     if primary {
         let u = ui.clone();

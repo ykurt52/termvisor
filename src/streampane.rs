@@ -22,6 +22,7 @@ use crate::files::downloads_dir;
 use crate::mav::Decoder;
 use crate::modem::{self, ChanWire, Ctl, Outgoing, Proto};
 use crate::transfers::Dir;
+use crate::output;
 use crate::xfers::Xfers;
 use crate::state::State;
 use crate::term::{self, Launch, Stream};
@@ -100,6 +101,8 @@ struct Pane {
     tail: RefCell<Vec<u8>>,
     /// A "remote rz wants a file" dialog is open.
     asking: Cell<bool>,
+    /// Timestamps, highlight and log of the received bytes.
+    out: Rc<RefCell<output::Out>>,
 }
 
 /// Owner and mirrors per serial device path.
@@ -111,6 +114,33 @@ struct Port {
 
 thread_local! {
     static PORTS: RefCell<HashMap<String, Port>> = RefCell::new(HashMap::new());
+    /// Stream panes by terminal, so other parts can write to their link.
+    static PANES: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Weak<Pane>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Local echo text for bytes sent from a button or the send bar.
+fn shown(bytes: &[u8], hex: bool) -> String {
+    if hex {
+        let h: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
+        format!("\x1b[2m» {}\x1b[0m\r\n", h.join(" "))
+    } else {
+        link::echo(&String::from_utf8_lossy(bytes))
+    }
+}
+
+/// Writes raw bytes to the link of the stream pane that shows `t`.
+/// Returns false when `t` is not a stream pane.
+pub fn write(t: &vte::Terminal, bytes: &[u8], hex: bool) -> bool {
+    let pane = PANES.with(|v| {
+        v.borrow().iter().find(|(w, _)| w.upgrade().as_ref() == Some(t)).and_then(|(_, p)| p.upgrade())
+    });
+    let Some(p) = pane else { return false };
+    if p.xfer.borrow().is_some() {
+        p.note("33", "file transfer running; sending is paused");
+        return true;
+    }
+    p.send(bytes.to_vec(), &shown(bytes, hex));
+    true
 }
 
 fn device(src: &Stream) -> Option<&str> {
@@ -128,8 +158,14 @@ impl Pane {
     }
 
     fn show(&self, data: &[u8]) {
+        if self.view.get() != View::Text {
+            self.out.borrow_mut().record(data);
+        }
         match self.view.get() {
-            View::Text => self.feed(data),
+            View::Text => {
+                let shown = self.out.borrow_mut().process(data);
+                self.feed(&shown);
+            }
             View::Hex => self.feed(self.hex.borrow_mut().feed(data).as_bytes()),
             View::Mavlink => {
                 let text = self.mav.borrow_mut().feed(data);
@@ -649,13 +685,8 @@ fn send_bar(p: &Rc<Pane>) -> gtk::Box {
             if bytes.is_empty() {
                 return;
             }
-            let shown = if hex {
-                let h: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
-                format!("\x1b[2m» {}\x1b[0m\r\n", h.join(" "))
-            } else {
-                link::echo(&String::from_utf8_lossy(&bytes))
-            };
-            p.send(bytes, &shown);
+            let echo = shown(&bytes, hex);
+            p.send(bytes, &echo);
             let mut h = history.borrow_mut();
             if h.last() != Some(&text) {
                 h.push(text);
@@ -728,6 +759,7 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
         stop: RefCell::new(None),
         tail: RefCell::new(Vec::new()),
         asking: Cell::new(false),
+        out: output::attach(&t, &launch.title, &state.cfg.borrow()),
     });
     stats.set_visible(p.view.get() == View::Mavlink);
 
@@ -874,6 +906,12 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal,
         for m in orphans {
             m.note("33", "owner pane closed; mirror stopped");
         }
+    });
+
+    PANES.with(|v| {
+        let mut v = v.borrow_mut();
+        v.retain(|(w, _)| w.upgrade().is_some());
+        v.push((t.downgrade(), Rc::downgrade(&p)));
     });
 
     if let Some(dev) = device(&p.src).map(str::to_string) {
