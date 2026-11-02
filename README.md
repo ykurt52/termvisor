@@ -3,9 +3,8 @@
 Multi-protocol terminal and remote access tool for Linux.
 Specification: [docs/SPEC.md](docs/SPEC.md).
 
-## Status
+## Features
 
-Milestone 1 plus the UI shell:
 
 - Activity bar, side panel with session tree (local shell + hosts from `~/.ssh/config`)
 - Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`, `ftp://host`, `adb://serial`)
@@ -24,7 +23,13 @@ Milestone 1 plus the UI shell:
 - Bottom dock and status bar
 - Live theme switching
 
-Panels marked with a milestone number are placeholders.
+## Install
+
+- Debian/Ubuntu 24.04+: the `.deb` from the releases page,
+  `sudo apt install ./termvisor_*.deb`.
+- Arch: the `termvisor` AUR package.
+
+Packaging details: [docs/packaging.md](docs/packaging.md).
 
 ## Build
 

@@ -6,6 +6,9 @@ rust-version = "1.92"
 license = "GPL-3.0-or-later"
 description = "Multi-protocol terminal and remote access tool"
 readme = "README.md"
+authors = ["Yunus Kurt <yunuskkurt@gmail.com>"]
+homepage = "https://github.com/ykurt52/termvisor"
+repository = "https://github.com/ykurt52/termvisor"
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
@@ -30,3 +33,29 @@ glib-build-tools = "0.22"
 lto = true
 codegen-units = 1
 strip = true
+
+# Debian package: cargo deb (after cargo build --release). See docs/packaging.md.
+[package.metadata.deb]
+maintainer = "Yunus Kurt <yunuskkurt@gmail.com>"
+copyright = "2026, Yunus Kurt"
+license-file = ["LICENSE", "0"]
+section = "net"
+priority = "optional"
+depends = "$auto, openssh-client"
+recommends = "iputils-ping, iputils-tracepath"
+suggests = "mosh, adb"
+extended-description = """\
+termvisor puts the connections of embedded and network work into one \
+window with tabs and split panes: local shells, SSH, mosh, serial ports, \
+raw TCP, telnet, FTP and Android devices. It adds serial file transfers \
+(XMODEM, YMODEM, ZMODEM), an SFTP/FTP file panel, command buttons, \
+macros, multi-exec, SSH tunnels, TFTP and HTTP servers, a port scanner, \
+passive USB capture and a theme editor."""
+assets = [
+    ["target/release/termvisor", "usr/bin/", "755"],
+    ["data/io.github.ykurt52.termvisor.desktop", "usr/share/applications/", "644"],
+    ["data/io.github.ykurt52.termvisor.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["data/icons/hicolor/scalable/apps/io.github.ykurt52.termvisor.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["README.md", "usr/share/doc/termvisor/", "644"],
+    ["docs/*.md", "usr/share/doc/termvisor/docs/", "644"],
+]

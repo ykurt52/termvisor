@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Oldest Rust that builds termvisor (gtk-rs 0.11 needs 1.92).
+  MSRV: "1.92"
+
+jobs:
+  ubuntu:
+    name: Ubuntu 24.04, Rust 1.92
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev libudev-dev \
+            pkg-config python3 iputils-ping iputils-tracepath xvfb dbus-x11 \
+            desktop-file-utils appstream dpkg-dev
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install "$MSRV" --profile minimal --component clippy
+          rustup default "$MSRV"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      # A virtual display lets the GTK test run too.
+      - name: Tests
+        run: xvfb-run -a dbus-run-session -- cargo test --locked
+
+      - name: Desktop file and metainfo
+        run: |
+          desktop-file-validate data/io.github.ykurt52.termvisor.desktop
+          appstreamcli validate --no-net data/io.github.ykurt52.termvisor.metainfo.xml
+
+      - name: Release build and .deb
+        run: |
+          cargo build --release --locked
+          cargo install cargo-deb --locked --version '^2'
+          cargo deb --no-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termvisor-deb
+          path: target/debian/*.deb
+
+  arch:
+    name: Arch Linux
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - name: System packages
+        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita vte4 libsecret python iputils
+
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          cargo build --locked
+          cargo test --locked

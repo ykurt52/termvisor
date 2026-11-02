@@ -1,0 +1,44 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds the .deb and attaches it to a GitHub
+# release with that name (the source tarball is added by GitHub).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version matches the tag
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          test "$want" = "$have" || { echo "tag $GITHUB_REF_NAME but Cargo.toml has $have"; exit 1; }
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev libudev-dev pkg-config dpkg-dev
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.92 --profile minimal
+          rustup default 1.92
+
+      - name: Build .deb
+        run: |
+          cargo build --release --locked
+          cargo install cargo-deb --locked --version '^2'
+          cargo deb --no-build
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" target/debian/*.deb --title "$GITHUB_REF_NAME" --generate-notes

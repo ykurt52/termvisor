@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ykurt52.termvisor</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>termvisor</name>
+  <summary>Terminal for SSH, serial ports and embedded work</summary>
+  <developer id="io.github.ykurt52">
+    <name>Yunus Kurt</name>
+  </developer>
+  <description>
+    <p>
+      termvisor puts the connections of embedded and network work into one window
+      with tabs and split panes: local shells, SSH, mosh, serial ports, raw TCP,
+      telnet, FTP and Android devices.
+    </p>
+    <ul>
+      <li>Serial ports with locking, mirrors, hex and MAVLink views, XMODEM, YMODEM and ZMODEM</li>
+      <li>SFTP and FTP file panel with a transfer queue and resume</li>
+      <li>Command buttons, macros with expect, multi-exec to several panes</li>
+      <li>Timestamps, regex highlighting and logging in every pane</li>
+      <li>SSH tunnels, TFTP and HTTP servers, port scanner, ping graph, Wake-on-LAN</li>
+      <li>Passive USB capture with decoders for USB serial adapters, HID and mass storage</li>
+      <li>adb shell, logcat and device files</li>
+      <li>Themes with an editor, remappable shortcuts and a command palette</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.ykurt52.termvisor.desktop</launchable>
+  <url type="homepage">https://github.com/ykurt52/termvisor</url>
+  <url type="bugtracker">https://github.com/ykurt52/termvisor/issues</url>
+  <url type="vcs-browser">https://github.com/ykurt52/termvisor</url>
+  <provides>
+    <binary>termvisor</binary>
+  </provides>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-02">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>
