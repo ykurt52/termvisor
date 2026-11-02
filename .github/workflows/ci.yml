@@ -15,7 +15,7 @@ jobs:
     name: Ubuntu 24.04, Rust 1.92
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System packages
         run: |
@@ -50,7 +50,7 @@ jobs:
           cargo install cargo-deb --locked --version '^2'
           cargo deb --no-build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: termvisor-deb
           path: target/debian/*.deb
@@ -63,7 +63,7 @@ jobs:
       - name: System packages
         run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita vte4 libsecret python iputils
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build and test
         run: |
