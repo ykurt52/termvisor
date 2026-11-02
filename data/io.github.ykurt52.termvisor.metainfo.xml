@@ -29,6 +29,28 @@
   <url type="homepage">https://github.com/ykurt52/termvisor</url>
   <url type="bugtracker">https://github.com/ykurt52/termvisor/issues</url>
   <url type="vcs-browser">https://github.com/ykurt52/termvisor</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/console.png</image>
+      <caption>Serial console with highlighting, timestamps and command buttons</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/usb-capture.png</image>
+      <caption>Decoded USB capture of a serial adapter</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/android.png</image>
+      <caption>Logcat view and Android device list</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/tools.png</image>
+      <caption>Ping tool with a round trip graph</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/light-multiexec.png</image>
+      <caption>Light theme with multi-exec</caption>
+    </screenshot>
+  </screenshots>
   <provides>
     <binary>termvisor</binary>
   </provides>

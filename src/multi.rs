@@ -109,7 +109,8 @@ pub fn wrap(t: &vte::Terminal, leaf: &gtk::Widget) -> gtk::Overlay {
     o.add_overlay(&frame);
     let check = gtk::CheckButton::with_label("Multi-exec");
     check.add_css_class("multi-check");
-    check.set_halign(gtk::Align::End);
+    // Top center: pane toolbars keep their controls at both ends.
+    check.set_halign(gtk::Align::Center);
     check.set_valign(gtk::Align::Start);
     check.set_focus_on_click(false);
     check.set_visible(on());

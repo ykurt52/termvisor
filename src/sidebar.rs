@@ -131,7 +131,7 @@ fn titled(title: &str, body: &impl IsA<gtk::Widget>) -> gtk::Box {
     let b = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let l = gtk::Label::new(Some(&title.to_uppercase()));
     l.set_xalign(0.0);
-    l.add_css_class("title");
+    l.add_css_class("pagetitle");
     b.append(&l);
     b.append(body);
     b
