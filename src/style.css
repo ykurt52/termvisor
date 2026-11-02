@@ -86,6 +86,11 @@ tabbar tab:selected {
   border-top: 1px solid @borders;
 }
 
+.dock.right {
+  border-top: none;
+  border-left: 1px solid @borders;
+}
+
 .dock stackswitcher button {
   min-height: 24px;
   padding: 0 10px;

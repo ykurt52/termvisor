@@ -58,6 +58,9 @@ pub struct Button {
     pub delay_ms: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Keyboard shortcut in GTK accelerator form, e.g. "<Ctrl>1" or "F5".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 impl Button {
@@ -82,8 +85,45 @@ impl Button {
 #[serde(default)]
 pub struct Page {
     pub name: String,
+    /// Shown when a pane whose title or target matches one of these globs
+    /// gets the focus, e.g. "U-Boot*", "/dev/ttyUSB*", "root@10.0.0.*".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<String>,
     #[serde(rename = "button", skip_serializing_if = "Vec::is_empty")]
     pub buttons: Vec<Button>,
+}
+
+impl Page {
+    pub fn matches(&self, title: &str, target: &str) -> bool {
+        self.sessions.iter().any(|g| glob(g, title) || glob(g, target))
+    }
+}
+
+/// Case-insensitive glob with `*` (any run) and `?` (one character).
+pub fn glob(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.trim().to_lowercase().chars().collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    if p.is_empty() {
+        return false;
+    }
+    let (mut pi, mut ti) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some((pi, ti));
+            pi += 1;
+        } else if let Some((sp, st)) = star {
+            pi = sp + 1;
+            ti = st + 1;
+            star = Some((sp, st + 1));
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|&c| c == '*')
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,7 +161,7 @@ pub fn load() -> Vec<Page> {
 }
 
 fn load_from(path: &Path) -> Vec<Page> {
-    let fresh = || vec![Page { name: "Commands".into(), buttons: Vec::new() }];
+    let fresh = || vec![Page { name: "Commands".into(), ..Default::default() }];
     match fs::read_to_string(path) {
         Ok(t) => match parse(&t) {
             Ok(p) if !p.is_empty() => p,
@@ -178,6 +218,7 @@ mod tests {
     fn roundtrip_and_limits() {
         let pages = vec![Page {
             name: "U-Boot".into(),
+            sessions: vec!["U-Boot*".into()],
             buttons: vec![Button { label: "env".into(), text: "printenv".into(), color: Some("green".into()), ..Default::default() }],
         }];
         let text = dump(&pages).expect("dump");
@@ -189,6 +230,19 @@ mod tests {
             big.push_str("[[page.button]]\nlabel = \"b\"\n");
         }
         assert!(parse(&big).is_err());
+    }
+
+    #[test]
+    fn session_globs() {
+        assert!(glob("U-Boot*", "u-boot ttyUSB0"));
+        assert!(glob("/dev/ttyUSB?", "/dev/ttyUSB1"));
+        assert!(glob("root@10.0.0.*", "root@10.0.0.17"));
+        assert!(glob("*board*", "my-board-2"));
+        assert!(!glob("/dev/ttyUSB?", "/dev/ttyUSB10"));
+        assert!(!glob("", "x"));
+        let p = Page { name: "x".into(), sessions: vec!["*ttyS4*".into()], ..Default::default() };
+        assert!(p.matches("Console", "/dev/ttyS4@115200"));
+        assert!(!p.matches("Console", "/dev/ttyS1"));
     }
 
     #[test]

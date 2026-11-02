@@ -135,9 +135,21 @@ impl State {
     }
 
     pub fn set_restore(&self, on: bool) {
-        self.cfg.borrow_mut().restore_tabs = on;
+        self.edit_cfg(|c| c.restore_tabs = on);
+    }
+
+    /// Changes settings and saves them.
+    pub fn edit_cfg(&self, f: impl FnOnce(&mut Settings)) {
+        f(&mut self.cfg.borrow_mut());
         if let Err(e) = self.cfg.borrow().save() {
             crate::warn(&format!("save settings: {e}"));
+        }
+    }
+
+    /// Tells command panels to redraw (e.g. after a key setting changed).
+    pub fn commands_changed(&self) {
+        for f in self.cmd_listeners.borrow().iter() {
+            f();
         }
     }
 

@@ -11,6 +11,23 @@ pub struct Dock {
     pub widget: gtk::Box,
     pub commands: Rc<cmdpanel::Panel>,
     pub logs: Rc<logpanel::Panel>,
+    hide: gtk::Button,
+}
+
+impl Dock {
+    /// Lays the dock out for the bottom or the right side of the window.
+    pub fn set_right(&self, right: bool) {
+        if right {
+            self.widget.set_size_request(340, -1);
+            self.widget.add_css_class("right");
+            self.hide.set_icon_name("pan-end-symbolic");
+        } else {
+            self.widget.set_size_request(-1, 170);
+            self.widget.remove_css_class("right");
+            self.hide.set_icon_name("pan-down-symbolic");
+        }
+        self.logs.set_vertical(right);
+    }
 }
 
 pub fn build(state: &Rc<State>) -> Dock {
@@ -44,5 +61,5 @@ pub fn build(state: &Rc<State>) -> Dock {
     dock.set_size_request(-1, 170);
     dock.append(&head);
     dock.append(&stack);
-    Dock { widget: dock, commands, logs }
+    Dock { widget: dock, commands, logs, hide }
 }

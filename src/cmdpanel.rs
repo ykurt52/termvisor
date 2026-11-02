@@ -6,7 +6,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use adw::prelude::*;
-use gtk::{gdk, gio, glib, graphene};
+use gtk::{gdk, gio, glib, glib::translate::IntoGlib, graphene};
 use vte::prelude::*;
 
 use crate::commands::{self, Button, Ending, Page, MAX_BUTTONS};
@@ -38,6 +38,9 @@ pub struct Panel {
     flow: gtk::FlowBox,
     count: gtk::Label,
     menu: gtk::PopoverMenu,
+    /// Button shortcuts of the shown page; added to the window.
+    keys: gtk::ShortcutController,
+    fkeys: RefCell<Option<gio::SimpleAction>>,
     /// Finds the pane that receives button sends.
     target: RefCell<Option<Target>>,
     /// Set while the page list is rebuilt, so the dropdown signal is ignored.
@@ -51,13 +54,16 @@ pub fn build(state: &Rc<State>) -> Rc<Panel> {
 
     let pages = gio::Menu::new();
     pages.append(Some("New Page…"), Some("cmd.page-new"));
-    pages.append(Some("Rename Page…"), Some("cmd.page-rename"));
+    pages.append(Some("Page Settings…"), Some("cmd.page-settings"));
     pages.append(Some("Delete Page"), Some("cmd.page-delete"));
+    let keys = gio::Menu::new();
+    keys.append(Some("F1–F12 Send Buttons 1–12"), Some("cmd.fkeys"));
     let files = gio::Menu::new();
     files.append(Some("Import…"), Some("cmd.import"));
     files.append(Some("Export…"), Some("cmd.export"));
     let model = gio::Menu::new();
     model.append_section(None, &pages);
+    model.append_section(None, &keys);
     model.append_section(None, &files);
     let more = gtk::MenuButton::new();
     more.set_icon_name("view-more-symbolic");
@@ -114,6 +120,10 @@ pub fn build(state: &Rc<State>) -> Rc<Panel> {
     let m = menu.clone();
     widget.connect_destroy(move |_| m.unparent());
 
+    let keys = gtk::ShortcutController::new();
+    // Before the terminal, which would take the keys otherwise.
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+
     let p = Rc::new(Panel {
         widget,
         state: state.clone(),
@@ -123,10 +133,14 @@ pub fn build(state: &Rc<State>) -> Rc<Panel> {
         flow,
         count,
         menu,
+        keys,
+        fkeys: RefCell::new(None),
         target: RefCell::new(None),
         syncing: Cell::new(false),
     });
-    p.widget.insert_action_group("cmd", Some(&actions(&p)));
+    let group = actions(&p);
+    p.fkeys.replace(group.lookup_action("fkeys").and_downcast());
+    p.widget.insert_action_group("cmd", Some(&group));
     // The panel lives as long as its widget; destroy breaks the cycle.
     let keep = RefCell::new(Some(p.clone()));
     p.widget.connect_destroy(move |_| drop(keep.take()));
@@ -153,6 +167,24 @@ impl Panel {
     /// Sets how the receiving pane is found (normally the focused one).
     pub fn set_target(&self, f: impl Fn() -> Option<vte::Terminal> + 'static) {
         self.target.replace(Some(Box::new(f)));
+    }
+
+    /// Shortcuts of the shown page, for the window to handle.
+    pub fn keys(&self) -> gtk::ShortcutController {
+        self.keys.clone()
+    }
+
+    /// Shows the first page made for the session `title` / `target`,
+    /// unless the shown page is one of them.
+    pub fn follow(&self, title: &str, target: &str) {
+        let pages = self.state.commands.borrow();
+        if pages.get(self.page.get()).is_some_and(|p| p.matches(title, target)) {
+            return;
+        }
+        let Some(at) = pages.iter().position(|p| p.matches(title, target)) else { return };
+        drop(pages);
+        self.page.set(at);
+        self.refresh();
     }
 
     fn toast(&self, msg: &str) {
@@ -197,15 +229,62 @@ impl Panel {
         self.names.splice(0, self.names.n_items(), &refs);
         self.pick.set_selected(at as u32);
         self.syncing.set(false);
+        if let Some(a) = self.fkeys.borrow().as_ref() {
+            a.set_state(&self.state.cfg.borrow().command_keys.to_variant());
+        }
         self.fill();
+    }
+
+    /// Key of button `i`: its own, else F1–F12 for the first 12 when on.
+    fn key_of(&self, i: usize, b: &Button) -> Option<String> {
+        b.key.clone().or_else(|| (self.state.cfg.borrow().command_keys && i < 12).then(|| format!("F{}", i + 1)))
+    }
+
+    /// Rebuilds the shortcuts for `page`.
+    fn bind(&self, page: &Page) {
+        let old: Vec<gtk::Shortcut> = (0..self.keys.n_items()).filter_map(|i| self.keys.item(i).and_downcast()).collect();
+        for s in old {
+            self.keys.remove_shortcut(&s);
+        }
+        // Own keys first, so they win over the F1–F12 defaults.
+        let mut keys: Vec<(usize, String)> =
+            page.buttons.iter().enumerate().filter_map(|(i, b)| b.key.clone().map(|k| (i, k))).collect();
+        keys.extend(
+            page.buttons
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.key.is_none())
+                .filter_map(|(i, b)| self.key_of(i, b).map(|k| (i, k))),
+        );
+        for (i, key) in keys {
+            let Some(trigger) = gtk::ShortcutTrigger::parse_string(&key) else { continue };
+            let panel = self.widget.downgrade();
+            // Only while a terminal has the focus; dialogs and entries keep their keys.
+            let action = gtk::CallbackAction::new(move |w, _| {
+                let in_term = w
+                    .downcast_ref::<gtk::Window>()
+                    .and_then(gtk::prelude::GtkWindowExt::focus)
+                    .and_then(|f| f.ancestor(vte::Terminal::static_type()))
+                    .is_some();
+                match panel.upgrade() {
+                    Some(p) if in_term => {
+                        let _ = WidgetExt::activate_action(&p, "cmd.send", Some(&(i as u32).to_variant()));
+                        glib::Propagation::Stop
+                    }
+                    _ => glib::Propagation::Proceed,
+                }
+            });
+            self.keys.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+        }
     }
 
     fn fill(&self) {
         self.flow.remove_all();
         let page = self.current().unwrap_or_default();
         for (i, b) in page.buttons.iter().enumerate() {
-            self.flow.append(&self.make(i, b));
+            self.flow.append(&self.make(i, b, self.key_of(i, b)));
         }
+        self.bind(&page);
         if page.buttons.len() < MAX_BUTTONS {
             let add = gtk::Button::with_label("+");
             add.add_css_class("cmd");
@@ -223,16 +302,31 @@ impl Panel {
         self.count.set_text(&format!("{}/{MAX_BUTTONS}", page.buttons.len()));
     }
 
-    fn make(&self, i: usize, b: &Button) -> gtk::Button {
+    fn make(&self, i: usize, b: &Button, key: Option<String>) -> gtk::Button {
         let label = if b.label.is_empty() { "(no label)" } else { &b.label };
-        let w = gtk::Button::with_label(label);
+        let shown = key.as_deref().map(key_label);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        row.append(&gtk::Label::new(Some(label)));
+        if let Some(k) = &shown {
+            let l = gtk::Label::new(Some(k));
+            l.add_css_class("dim-label");
+            l.add_css_class("caption");
+            row.append(&l);
+        }
+        let w = gtk::Button::new();
+        w.set_child(Some(&row));
+        w.update_property(&[gtk::accessible::Property::Label(label)]);
         w.add_css_class("cmd");
         if let Some(c) = &b.color {
             w.add_css_class(&format!("c-{c}"));
         }
         // Keeps the keyboard focus, and so the target, on the terminal.
         w.set_focus_on_click(false);
-        w.set_tooltip_text(Some(&preview(b)));
+        let tip = match &shown {
+            Some(k) => format!("{}\nShortcut: {k}", preview(b)),
+            None => preview(b),
+        };
+        w.set_tooltip_text(Some(&tip));
         w.set_action_name(Some("cmd.send"));
         w.set_action_target_value(Some(&(i as u32).to_variant()));
 
@@ -293,7 +387,7 @@ impl Panel {
     fn add_page(self: &Rc<Self>) {
         let p = self.clone();
         ask_name(&self.widget, "New Page", "", move |name| {
-            let res = p.state.edit_commands(|pages| pages.push(Page { name, buttons: Vec::new() }));
+            let res = p.state.edit_commands(|pages| pages.push(Page { name, ..Default::default() }));
             p.page.set(p.state.commands.borrow().len().saturating_sub(1));
             p.refresh();
             if let Err(e) = res {
@@ -302,10 +396,50 @@ impl Panel {
         });
     }
 
-    fn rename_page(self: &Rc<Self>) {
+    fn page_settings(self: &Rc<Self>) {
         let Some(cur) = self.current() else { return };
+        let d = adw::AlertDialog::new(Some("Page Settings"), None);
+        let name = gtk::Entry::new();
+        name.set_text(&cur.name);
+        name.set_placeholder_text(Some("Page name"));
+        name.set_activates_default(true);
+        let sessions = gtk::Entry::new();
+        sessions.set_text(&cur.sessions.join(", "));
+        sessions.set_placeholder_text(Some("U-Boot*, /dev/ttyUSB*, root@10.0.0.*"));
+        sessions.set_activates_default(true);
+        let hint = gtk::Label::new(Some(
+            "Shown when a pane whose title or target matches gets the focus. Comma separated; * and ? match.",
+        ));
+        hint.add_css_class("dim-label");
+        hint.add_css_class("caption");
+        hint.set_wrap(true);
+        hint.set_xalign(0.0);
+        let label = gtk::Label::new(Some("Sessions"));
+        label.set_xalign(0.0);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        body.append(&name);
+        body.append(&label);
+        body.append(&sessions);
+        body.append(&hint);
+        d.set_extra_child(Some(&body));
+        d.add_responses(&[("cancel", "Cancel"), ("ok", "Save")]);
+        d.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
+        d.set_default_response(Some("ok"));
+        d.set_close_response("cancel");
         let p = self.clone();
-        ask_name(&self.widget, "Rename Page", &cur.name, move |name| p.edit(|pg| pg.name = name));
+        d.connect_response(None, move |_, r| {
+            let n = name.text().trim().to_string();
+            if r != "ok" || n.is_empty() {
+                return;
+            }
+            let globs: Vec<String> =
+                sessions.text().split(',').map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect();
+            p.edit(|pg| {
+                pg.name = n;
+                pg.sessions = globs;
+            });
+        });
+        d.present(Some(&self.widget));
     }
 
     fn delete_page(self: &Rc<Self>) {
@@ -318,7 +452,7 @@ impl Panel {
                     pages.remove(at);
                 }
                 if pages.is_empty() {
-                    pages.push(Page { name: "Commands".into(), buttons: Vec::new() });
+                    pages.push(Page { name: "Commands".into(), ..Default::default() });
                 }
             });
             if let Err(e) = res {
@@ -425,6 +559,11 @@ fn send(t: &vte::Terminal, chunks: Vec<Vec<u8>>, hex: bool, delay_ms: u32) {
     }
 }
 
+/// "Ctrl+1" for "<Control>1".
+fn key_label(key: &str) -> String {
+    gtk::accelerator_parse(key).map(|(k, m)| gtk::accelerator_get_label(k, m).to_string()).unwrap_or_else(|| key.to_string())
+}
+
 fn preview(b: &Button) -> String {
     const MAX: usize = 200;
     let mut s: String = b.text.chars().take(MAX).collect();
@@ -501,10 +640,22 @@ fn actions(p: &Rc<Panel>) -> gio::SimpleActionGroup {
         editor(p, None, Button::default());
     });
     plain("page-new", |p| p.add_page());
-    plain("page-rename", |p| p.rename_page());
+    plain("page-settings", |p| p.page_settings());
     plain("page-delete", |p| p.delete_page());
     plain("import", |p| p.import());
     plain("export", |p| p.export());
+
+    let a = gio::SimpleAction::new_stateful("fkeys", None, &p.state.cfg.borrow().command_keys.to_variant());
+    let w = Rc::downgrade(p);
+    a.connect_activate(move |a, _| {
+        let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+        a.set_state(&on.to_variant());
+        if let Some(p) = w.upgrade() {
+            p.state.edit_cfg(|c| c.command_keys = on);
+            p.state.commands_changed();
+        }
+    });
+    group.add_action(&a);
 
     let a = gio::SimpleAction::new("move", Some(&glib::VariantType::new("(uu)").expect("type")));
     let w: Weak<Panel> = Rc::downgrade(p);
@@ -585,6 +736,29 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
     let names: Vec<&str> = COLORS.iter().map(|c| c.0).collect();
     let color = combo("Color", &names, COLORS.iter().position(|c| c.1 == init.color.as_deref()).unwrap_or(0));
 
+    let key: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(init.key.clone()));
+    let shortcut = adw::ActionRow::new();
+    shortcut.set_title("Shortcut");
+    shortcut.set_subtitle("Works while a terminal has the focus");
+    let accel = gtk::ShortcutLabel::new(init.key.as_deref().unwrap_or(""));
+    accel.set_disabled_text("None");
+    accel.set_valign(gtk::Align::Center);
+    let record = gtk::ToggleButton::with_label("Set…");
+    record.set_valign(gtk::Align::Center);
+    let clear = gtk::Button::from_icon_name("edit-clear-symbolic");
+    clear.add_css_class("flat");
+    clear.set_valign(gtk::Align::Center);
+    clear.set_tooltip_text(Some("No shortcut"));
+    shortcut.add_suffix(&accel);
+    shortcut.add_suffix(&record);
+    shortcut.add_suffix(&clear);
+    record.connect_toggled(|b| b.set_label(if b.is_active() { "Press keys…" } else { "Set…" }));
+    let (k, a) = (key.clone(), accel.clone());
+    clear.connect_clicked(move |_| {
+        k.replace(None);
+        a.set_accelerator("");
+    });
+
     let top = adw::PreferencesGroup::new();
     top.add(&label);
     let body = adw::PreferencesGroup::new();
@@ -595,6 +769,7 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
     opts.add(&eol);
     opts.add(&delay);
     opts.add(&color);
+    opts.add(&shortcut);
 
     let sync = {
         let (mode, eol, delay, body) = (mode.clone(), eol.clone(), delay.clone(), body.clone());
@@ -633,6 +808,38 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
     dlg.set_content_height(600);
     dlg.set_child(Some(&view));
 
+    // While "Set…" is on, the next key combination becomes the shortcut.
+    let catch = gtk::EventControllerKey::new();
+    catch.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (k, a, r, t) = (key.clone(), accel.clone(), record.clone(), toasts.clone());
+    catch.connect_key_pressed(move |_, keyval, _, state| {
+        if !r.is_active() {
+            return glib::Propagation::Proceed;
+        }
+        let mods = state & gtk::accelerator_get_default_mod_mask();
+        if keyval == gdk::Key::Escape && mods.is_empty() {
+            r.set_active(false);
+            return glib::Propagation::Stop;
+        }
+        // Modifier alone: wait for the rest.
+        if !gtk::accelerator_valid(keyval, mods) {
+            return glib::Propagation::Stop;
+        }
+        let v = keyval.into_glib();
+        let fkey = (gdk::Key::F1.into_glib()..=gdk::Key::F35.into_glib()).contains(&v);
+        let held = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK;
+        if !fkey && !mods.intersects(held) {
+            t.add_toast(adw::Toast::new("Use Ctrl, Alt or Super with this key, or a function key"));
+            return glib::Propagation::Stop;
+        }
+        let name = gtk::accelerator_name(keyval, mods).to_string();
+        a.set_accelerator(&name);
+        k.replace(Some(name));
+        r.set_active(false);
+        glib::Propagation::Stop
+    });
+    dlg.add_controller(catch);
+
     let d = dlg.clone();
     cancel.connect_clicked(move |_| {
         d.close();
@@ -651,6 +858,7 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
             eol: Ending::ALL.get(eol.selected() as usize).copied().unwrap_or_default(),
             delay_ms: delay.value() as u32,
             color: COLORS.get(color.selected() as usize).and_then(|c| c.1).map(str::to_string),
+            key: key.borrow().clone(),
         };
         if b.text.trim().is_empty() && b.eol == Ending::None {
             return toasts.add_toast(adw::Toast::new("Nothing to send"));
@@ -660,6 +868,12 @@ fn editor(p: &Rc<Panel>, at: Option<usize>, init: Button) {
         }
         if b.label.is_empty() {
             b.label = b.text.lines().next().unwrap_or("").chars().take(24).collect();
+        }
+        let taken = b.key.as_ref().and_then(|k| {
+            p.current()?.buttons.iter().enumerate().find(|(i, o)| Some(*i) != at && o.key.as_ref() == Some(k)).map(|(_, o)| o.label.clone())
+        });
+        if let Some(other) = taken {
+            return toasts.add_toast(adw::Toast::new(&format!("Shortcut already used by “{other}”")));
         }
         let full = at.is_none() && p.current().is_some_and(|pg| pg.buttons.len() >= MAX_BUTTONS);
         if full {

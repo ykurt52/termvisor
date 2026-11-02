@@ -27,6 +27,10 @@ pub struct Settings {
     pub log: LogMode,
     /// Log folder; empty uses ~/.local/share/termvisor/logs.
     pub log_dir: String,
+    /// F1–F12 send command buttons 1–12 of the shown page.
+    pub command_keys: bool,
+    /// Bottom dock on the right side instead.
+    pub dock_right: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +45,8 @@ impl Default for Settings {
             highlight: true,
             log: LogMode::Off,
             log_dir: String::new(),
+            command_keys: false,
+            dock_right: false,
         }
     }
 }

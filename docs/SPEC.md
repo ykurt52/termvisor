@@ -166,8 +166,10 @@ Tools menu:
 - Multi-line payload with per-line delay (ms).
 - Hex payload mode (`0x55 0xAA 0x01`).
 - Click sends to the active pane, or to all multi-exec targets when active.
-- Shortcuts: F1–F12 for the first 12 buttons, others assignable.
-- Global or per-session pages; a session can open a default page.
+- Shortcuts: F1–F12 for the first 12 buttons (toggle, off by default),
+  any button can have its own.
+- Pages are global; a page lists session patterns and is shown when a
+  matching pane gets the focus.
 - Dock bottom or right, hide, reorder by drag.
 - Import/export pages as TOML.
 

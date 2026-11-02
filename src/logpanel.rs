@@ -220,6 +220,23 @@ impl Panel {
         }
     }
 
+    /// Stacks the pane controls over the rules (for a narrow dock).
+    pub fn set_vertical(&self, on: bool) {
+        let (outer, line) = if on {
+            (gtk::Orientation::Vertical, gtk::Orientation::Horizontal)
+        } else {
+            (gtk::Orientation::Horizontal, gtk::Orientation::Vertical)
+        };
+        self.widget.set_orientation(outer);
+        let mut child = self.widget.first_child();
+        while let Some(c) = child {
+            if let Some(sep) = c.downcast_ref::<gtk::Separator>() {
+                sep.set_orientation(line);
+            }
+            child = c.next_sibling();
+        }
+    }
+
     /// Shows the settings of the focused pane.
     pub fn sync(&self) {
         let t = self.target.borrow().as_ref().and_then(|f| f());

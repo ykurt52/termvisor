@@ -55,7 +55,8 @@ struct Ui {
     win: adw::ApplicationWindow,
     view: adw::TabView,
     sidebar: Sidebar,
-    dock: gtk::Box,
+    dock: Rc<dock::Dock>,
+    vsplit: gtk::Paned,
     /// Last terminal that had the focus.
     last: Rc<glib::WeakRef<vte::Terminal>>,
     status: Status,
@@ -81,6 +82,15 @@ impl Ui {
         if remember {
             self.state.remember(launch);
         }
+    }
+
+    /// Puts the dock below the tabs or on their right.
+    fn place_dock(&self, right: bool) {
+        let o = if right { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical };
+        self.vsplit.set_orientation(o);
+        self.dock.set_right(right);
+        // A negative position unsets it; the dock gets its requested size.
+        self.vsplit.set_position(-1);
     }
 
     fn refresh_status(&self) {
@@ -335,7 +345,7 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     main.add_named(&tabs, Some("tabs"));
     main.set_visible_child_name("welcome");
 
-    let dock = dock::build(state);
+    let dock = Rc::new(dock::build(state));
     let last: Rc<glib::WeakRef<vte::Terminal>> = Rc::default();
     let vsplit = gtk::Paned::new(gtk::Orientation::Vertical);
     vsplit.set_start_child(Some(&main));
@@ -423,7 +433,8 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         win: win.clone(),
         view: view.clone(),
         sidebar,
-        dock: dock.widget.clone(),
+        dock: dock.clone(),
+        vsplit: vsplit.clone(),
         last: last.clone(),
         status,
         quick: quick.clone(),
@@ -432,6 +443,10 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         pick: open_cb,
     };
     add_actions(&ui);
+    win.add_controller(dock.commands.keys());
+    if state.cfg.borrow().dock_right {
+        ui.place_dock(true);
+    }
 
     let u = ui.clone();
     quick.connect_activate(move |_| u.connect_quick());
@@ -463,6 +478,12 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     let (u, logs) = (ui.clone(), Rc::downgrade(&dock.logs));
     win.connect_focus_widget_notify(move |w| {
         if let Some(t) = focused(w) {
+            // A different pane: show its command page, if one is made for it.
+            if u.last.upgrade().as_ref() != Some(&t) {
+                if let Some(l) = u.state.launch(&t) {
+                    u.dock.commands.follow(&l.title, &l.target);
+                }
+            }
             u.last.set(Some(&t));
         }
         u.refresh_status();
@@ -523,6 +544,7 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     let view = gio::Menu::new();
     view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
     view.append(Some("Toggle Bottom Panel"), Some("win.toggle-dock"));
+    view.append(Some("Panel on Right"), Some("win.dock-right"));
 
     let sess = gio::Menu::new();
     sess.append(Some("Find Session…"), Some("win.find-session"));
@@ -628,7 +650,16 @@ fn add_actions(ui: &Ui) {
         }
     });
     action(ui, "toggle-sidebar", None, |u, _| u.sidebar.toggle());
-    action(ui, "toggle-dock", None, |u, _| u.dock.set_visible(!u.dock.is_visible()));
+    action(ui, "toggle-dock", None, |u, _| u.dock.widget.set_visible(!u.dock.widget.is_visible()));
+    let right = gio::SimpleAction::new_stateful("dock-right", None, &ui.state.cfg.borrow().dock_right.to_variant());
+    let u = ui.clone();
+    right.connect_activate(move |a, _| {
+        let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+        a.set_state(&on.to_variant());
+        u.state.edit_cfg(|c| c.dock_right = on);
+        u.place_dock(on);
+    });
+    ui.win.add_action(&right);
 
     on_term(ui, "split-right", |u, t| {
         pane::split(&u.state, t, gtk::Orientation::Horizontal);
