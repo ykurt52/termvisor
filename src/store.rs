@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::serial::SerialCfg;
 use crate::settings;
+use crate::ftp::FtpCfg;
 use crate::net::NetCfg;
 use crate::term::{Launch, Stream};
 
@@ -122,6 +123,22 @@ pub enum Entry {
     Telnet(Net),
     /// Same fields as ssh; ssh options apply to mosh's ssh bootstrap.
     Mosh(Ssh),
+    Ftp(FtpEntry),
+}
+
+/// FTP or FTPS server, opened in the Files panel.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FtpEntry {
+    pub name: String,
+    #[serde(flatten)]
+    pub cfg: FtpCfg,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub favorite: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub no_store: bool,
 }
 
 impl Entry {
@@ -132,6 +149,7 @@ impl Entry {
             Entry::Shell(s) => &s.name,
             Entry::Serial(s) => &s.name,
             Entry::Tcp(n) | Entry::Telnet(n) => &n.name,
+            Entry::Ftp(f) => &f.name,
         }
     }
 
@@ -142,6 +160,7 @@ impl Entry {
             Entry::Shell(s) => s.color.as_deref(),
             Entry::Serial(s) => s.color.as_deref(),
             Entry::Tcp(n) | Entry::Telnet(n) => n.color.as_deref(),
+            Entry::Ftp(f) => f.color.as_deref(),
         }
     }
 
@@ -152,6 +171,7 @@ impl Entry {
             Entry::Shell(s) => s.name = name,
             Entry::Serial(s) => s.name = name,
             Entry::Tcp(n) | Entry::Telnet(n) => n.name = name,
+            Entry::Ftp(f) => f.name = name,
         }
     }
 
@@ -162,6 +182,7 @@ impl Entry {
             Entry::Shell(s) => s.favorite = on,
             Entry::Serial(s) => s.favorite = on,
             Entry::Tcp(n) | Entry::Telnet(n) => n.favorite = on,
+            Entry::Ftp(f) => f.favorite = on,
         }
     }
 
@@ -180,6 +201,7 @@ impl Entry {
             Entry::Shell(s) => s.favorite,
             Entry::Serial(s) => s.favorite,
             Entry::Tcp(n) | Entry::Telnet(n) => n.favorite,
+            Entry::Ftp(f) => f.favorite,
         }
     }
 }
@@ -321,6 +343,13 @@ pub fn resolve(root: &[Entry], path: &[usize]) -> Result<Launch, String> {
         Some(Entry::Tcp(n)) => net_launch(n, false),
         Some(Entry::Telnet(n)) => net_launch(n, true),
         Some(Entry::Mosh(s)) => mosh_launch(s, &s.opts.inherit(&opts)),
+        Some(Entry::Ftp(f)) => {
+            f.cfg.check().map_err(|e| format!("'{}': {e}", f.name))?;
+            let mut l = Launch::ftp(f.cfg.clone());
+            l.title = f.name.clone();
+            l.keyring = !f.no_store;
+            Ok(l)
+        }
         Some(Entry::Folder(_)) => Err("a folder is not a session".into()),
         None => Err("bad session path".into()),
     }

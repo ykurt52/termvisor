@@ -9,7 +9,7 @@ const CARDS: &[(&str, &str, &str, &str, Option<&str>)] = &[
     ("media-removable-symbolic", "tint-yellow", "Serial", "win.new-session", Some("serial")),
     ("network-wired-symbolic", "tint-red", "Telnet", "win.new-session", Some("telnet")),
     ("network-transmit-receive-symbolic", "tint-magenta", "Raw TCP", "win.new-session", Some("tcp")),
-    ("folder-symbolic", "tint-cyan", "FTP", "win.soon", Some("FTP arrives in milestone 7")),
+    ("folder-remote-symbolic", "tint-cyan", "FTP", "win.new-session", Some("ftp")),
 ];
 
 fn card(icon: &str, tint: &str, label: &str) -> gtk::Button {

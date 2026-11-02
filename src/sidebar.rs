@@ -12,7 +12,7 @@ use crate::sessions::{self, Node, NodeKind};
 use crate::state::State;
 use crate::store::{self, Entry, Folder, Ssh};
 use crate::keyring;
-use crate::term::{Kind, Launch};
+use crate::term::Launch;
 
 /// Opens a session or reports why it can't.
 pub type OpenFn = Rc<dyn Fn(Result<Launch, String>)>;
@@ -86,6 +86,13 @@ impl Sidebar {
             self.stack.set_visible_child_name(id);
             self.panel.set_visible(true);
         }
+        self.mark();
+    }
+
+    /// Shows page `id`, never hides.
+    pub fn show(&self, id: &str) {
+        self.stack.set_visible_child_name(id);
+        self.panel.set_visible(true);
         self.mark();
     }
 
@@ -180,7 +187,7 @@ fn row_menu(node: Option<&Node>) -> gio::Menu {
                     menu_item(fav, "sess.favorite", None),
                 ]),
             );
-            if node.is_some_and(|n| matches!(&n.kind, NodeKind::Item(Ok(l)) if l.kind == Kind::Ssh)) {
+            if node.is_some_and(|n| matches!(&n.kind, NodeKind::Item(Ok(l)) if l.keyring)) {
                 menu.append_section(None, &section(&[menu_item("Forget Saved Password", "sess.forget", None)]));
             }
             menu.append_section(None, &create(parent, true));

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use gtk::glib;
 
+use crate::ftp::{FtpCfg, Tls};
 use crate::recent::Recent;
 use crate::store::{self, Entry};
 use crate::term::{Kind, Launch};
@@ -81,6 +82,7 @@ fn stored(root: &[Entry], list: &[Entry], prefix: &[usize]) -> Vec<Node> {
                 Entry::Tcp(_) => ("network-transmit-receive-symbolic", "tint-magenta", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Telnet(_) => ("network-wired-symbolic", "tint-red", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Mosh(_) => ("network-wireless-symbolic", "tint-cyan", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Ftp(_) => ("folder-remote-symbolic", "tint-blue", NodeKind::Item(store::resolve(root, &path))),
             };
             Node {
                 name: e.name().to_string(),
@@ -128,6 +130,7 @@ fn kind_look(k: Kind) -> (&'static str, &'static str) {
         Kind::Tcp => ("network-transmit-receive-symbolic", "tint-magenta"),
         Kind::Telnet => ("network-wired-symbolic", "tint-red"),
         Kind::Mosh => ("network-wireless-symbolic", "tint-cyan"),
+        Kind::Ftp => ("folder-remote-symbolic", "tint-blue"),
     }
 }
 
@@ -239,6 +242,7 @@ pub enum Quick {
     Serial { device: String, baud: Option<u32> },
     Net { host: String, port: u16, telnet: bool },
     Mosh(String),
+    Ftp(FtpCfg),
 }
 
 /// "host[:port]" or "[v6]:port"; `default` when no port is given.
@@ -280,6 +284,18 @@ pub fn quick(input: &str) -> Option<Quick> {
                 return None;
             }
             return Some(Quick::Net { host, port, telnet });
+        }
+    }
+    for (scheme, tls) in [("ftp://", Tls::None), ("ftps://", Tls::Explicit)] {
+        if let Some(rest) = s.strip_prefix(scheme) {
+            let rest = rest.trim_end_matches('/');
+            let (user, hostport) = match rest.rsplit_once('@') {
+                Some((u, h)) => (u.to_string(), h),
+                None => (String::new(), rest),
+            };
+            let (host, port) = host_port(hostport, Some(21))?;
+            let cfg = FtpCfg { host, port, user, tls, ..Default::default() };
+            return cfg.check().ok().map(|_| Quick::Ftp(cfg));
         }
     }
     if let Some(rest) = s.strip_prefix("mosh ") {
@@ -356,6 +372,10 @@ mod tests {
         assert_eq!(quick("tcp://host"), None);
         assert_eq!(quick("mosh yk@box"), Some(Quick::Mosh("yk@box".into())));
         assert_eq!(quick("mosh -x"), None);
+        let Some(Quick::Ftp(c)) = quick("ftps://yk@nas:2121") else { panic!("ftp") };
+        assert_eq!((c.user.as_str(), c.host.as_str(), c.port, c.tls), ("yk", "nas", 2121, Tls::Explicit));
+        let Some(Quick::Ftp(c)) = quick("ftp://10.0.0.5") else { panic!("ftp") };
+        assert_eq!((c.user.as_str(), c.port, c.tls), ("", 21, Tls::None));
         assert_eq!(quick("-oProxyCommand=x"), None);
         assert_eq!(quick("   "), None);
     }

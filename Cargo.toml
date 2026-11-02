@@ -19,6 +19,7 @@ serialport = "4.10"
 async-channel = "2"
 libc = "0.2"
 mavlink = { version = "0.21", default-features = false, features = ["std", "dialect-common", "mav2-message-extensions"] }
+suppaftp = { version = "12", features = ["native-tls"] }
 
 [build-dependencies]
 glib-build-tools = "0.22"

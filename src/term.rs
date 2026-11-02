@@ -11,6 +11,7 @@ use vte::prelude::*;
 use crate::askpass;
 use serde::{Deserialize, Serialize};
 
+use crate::ftp::FtpCfg;
 use crate::link::StreamOpts;
 use crate::net::NetCfg;
 use crate::serial::SerialCfg;
@@ -24,6 +25,7 @@ pub enum Kind {
     Tcp,
     Telnet,
     Mosh,
+    Ftp,
 }
 
 impl Kind {
@@ -35,6 +37,7 @@ impl Kind {
             Kind::Tcp => "TCP",
             Kind::Telnet => "Telnet",
             Kind::Mosh => "Mosh",
+            Kind::Ftp => "FTP",
         }
     }
 
@@ -46,6 +49,7 @@ impl Kind {
             Kind::Tcp => "network-transmit-receive-symbolic",
             Kind::Telnet => "network-wired-symbolic",
             Kind::Mosh => "network-wireless-symbolic",
+            Kind::Ftp => "folder-remote-symbolic",
         }
     }
 }
@@ -103,6 +107,8 @@ pub struct Launch {
     pub keyring: bool,
     /// In-process byte stream (serial, TCP, telnet).
     pub stream: Option<Stream>,
+    /// FTP server; opens in the Files panel instead of a tab.
+    pub ftp: Option<FtpCfg>,
 }
 
 impl Launch {
@@ -115,6 +121,7 @@ impl Launch {
             target: "local".into(),
             keyring: false,
             stream: None,
+            ftp: None,
         }
     }
 
@@ -130,6 +137,20 @@ impl Launch {
             target: target.to_string(),
             keyring: true,
             stream: None,
+            ftp: None,
+        }
+    }
+
+    pub fn ftp(cfg: FtpCfg) -> Self {
+        Self {
+            kind: Kind::Ftp,
+            argv: Vec::new(),
+            dir: None,
+            title: cfg.host.clone(),
+            target: cfg.id(),
+            keyring: true,
+            stream: None,
+            ftp: Some(cfg),
         }
     }
 
@@ -150,6 +171,7 @@ impl Launch {
             target: s.desc(),
             keyring: false,
             stream: Some(s),
+            ftp: None,
         }
     }
 }
@@ -181,6 +203,12 @@ pub fn spawn(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
         term.set_font(Some(&pango::FontDescription::from_string(&cfg.font)));
     }
     state.track(&term, launch);
+    let st = Rc::downgrade(state);
+    term.connect_current_directory_uri_changed(move |t| {
+        if let Some(s) = st.upgrade() {
+            s.cwd_changed(t);
+        }
+    });
     run(&term, launch);
     term
 }

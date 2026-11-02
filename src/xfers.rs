@@ -18,11 +18,21 @@ pub enum Run {
     Failed(String),
 }
 
+/// What a transfer was started with, for Retry.
+#[derive(Clone)]
+struct Spec {
+    local: PathBuf,
+    remote: String,
+    cmd: Cmd,
+    force: bool,
+}
+
 #[derive(Clone)]
 pub struct Item {
     pub id: u64,
     pub name: String,
     pub dir: Dir,
+    spec: Spec,
     pub total: u64,
     pub done: u64,
     pub run: Run,
@@ -124,14 +134,32 @@ impl Xfers {
         self.listeners.borrow_mut().push(Box::new(f));
     }
 
-    pub fn add(&self, dir: Dir, local: PathBuf, remote: String, cmd: Cmd) {
+    /// Queues a transfer; `force` overwrites regardless of the policy.
+    pub fn add(&self, dir: Dir, local: PathBuf, remote: String, cmd: Cmd, force: bool) {
         let name = match dir {
             Dir::Up => local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
             Dir::Down => remote.rsplit('/').next().unwrap_or(&remote).to_string(),
         };
-        let id = self.queue.add(dir, local, remote, cmd);
-        self.items.borrow_mut().push(Item { id, name, dir, total: 0, done: 0, run: Run::Queued, started: Instant::now() });
+        let spec = Spec { local, remote, cmd, force };
+        let id = self.queue.add(dir, spec.local.clone(), spec.remote.clone(), spec.cmd.clone(), force);
+        let it = Item { id, name, dir, spec, total: 0, done: 0, run: Run::Queued, started: Instant::now() };
+        self.items.borrow_mut().push(it);
         self.notify(id);
+    }
+
+    /// Runs a failed transfer again; a .part left behind is continued.
+    pub fn retry(&self, id: u64) {
+        {
+            let mut items = self.items.borrow_mut();
+            let Some(it) = items.iter_mut().find(|i| i.id == id && matches!(i.run, Run::Failed(_))) else { return };
+            let s = it.spec.clone();
+            it.id = self.queue.add(it.dir, s.local, s.remote, s.cmd, s.force);
+            it.run = Run::Queued;
+            it.done = 0;
+            it.started = Instant::now();
+        }
+        // Row ids changed; redraw the list.
+        self.notify(0);
     }
 
     pub fn item(&self, id: u64) -> Option<Item> {
@@ -161,6 +189,7 @@ struct Row {
     bar: gtk::ProgressBar,
     info: gtk::Label,
     cancel: gtk::Button,
+    retry: gtk::Button,
 }
 
 fn make_row(x: &Rc<Xfers>, it: &Item) -> Row {
@@ -194,6 +223,16 @@ fn make_row(x: &Rc<Xfers>, it: &Item) -> Row {
         }
     });
 
+    let retry = gtk::Button::from_icon_name("view-refresh-symbolic");
+    retry.add_css_class("flat");
+    retry.set_tooltip_text(Some("Retry (continues where it stopped)"));
+    let (w, id) = (Rc::downgrade(x), it.id);
+    retry.connect_clicked(move |_| {
+        if let Some(x) = w.upgrade() {
+            x.retry(id);
+        }
+    });
+
     let b = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     b.set_margin_start(6);
     b.set_margin_end(6);
@@ -203,10 +242,11 @@ fn make_row(x: &Rc<Xfers>, it: &Item) -> Row {
     b.append(&name);
     b.append(&bar);
     b.append(&info);
+    b.append(&retry);
     b.append(&cancel);
     let row = gtk::ListBoxRow::new();
     row.set_child(Some(&b));
-    Row { row, bar, info, cancel }
+    Row { row, bar, info, cancel, retry }
 }
 
 fn paint(r: &Row, it: &Item) {
@@ -214,6 +254,7 @@ fn paint(r: &Row, it: &Item) {
     r.info.set_text(&it.text());
     r.info.set_tooltip_text(Some(&it.text()));
     r.cancel.set_visible(!it.finished());
+    r.retry.set_visible(matches!(it.run, Run::Failed(_)));
     match &it.run {
         Run::Failed(_) => r.info.add_css_class("tint-red"),
         _ => r.info.remove_css_class("tint-red"),

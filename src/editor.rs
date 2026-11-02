@@ -6,6 +6,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::gio;
 
+use crate::ftp::{FtpCfg, Tls};
 use crate::link::{Eol, StreamOpts, View};
 use crate::net::NetCfg;
 use crate::serial::{self, Flow, Parity, SerialCfg};
@@ -14,7 +15,8 @@ use crate::store::{self, Entry, Folder, Shell, Ssh, SshOpts};
 
 const COLORS: &[&str] = &["Default", "Blue", "Green", "Yellow", "Red", "Magenta", "Cyan"];
 const TRISTATE: &[&str] = &["Inherit", "On", "Off"];
-const KINDS: &[&str] = &["SSH", "Shell", "Serial", "Telnet", "Raw TCP", "Mosh"];
+const KINDS: &[&str] = &["SSH", "Shell", "Serial", "Telnet", "Raw TCP", "Mosh", "FTP"];
+const FTP_TLS: &[&str] = &["None (plain FTP)", "Explicit (FTPES, AUTH TLS)"];
 const BAUDS: &[u32] = &[
     1200, 2400, 4800, 9600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600, 1_000_000, 1_500_000,
     2_000_000, 3_000_000,
@@ -40,6 +42,7 @@ enum Kind {
     Telnet,
     Tcp,
     Mosh,
+    Ftp,
     Folder,
 }
 
@@ -169,6 +172,72 @@ impl StreamRows {
             mavlink: view == View::Mavlink,
             reconnect: self.reconnect.is_active(),
         }
+    }
+}
+
+/// FTP server rows.
+#[derive(Clone)]
+struct FtpRows {
+    group: adw::PreferencesGroup,
+    host: adw::EntryRow,
+    port: adw::EntryRow,
+    user: adw::EntryRow,
+    tls: adw::ComboRow,
+    passive: adw::SwitchRow,
+    insecure: adw::SwitchRow,
+    remember: adw::SwitchRow,
+}
+
+impl FtpRows {
+    fn new() -> Self {
+        let rows = Self {
+            group: adw::PreferencesGroup::new(),
+            host: entry_row("Host"),
+            port: entry_row("Port"),
+            user: entry_row("User (empty = anonymous)"),
+            tls: combo("Encryption", FTP_TLS),
+            passive: switch("Passive Mode", "Needed behind most NAT and firewalls"),
+            insecure: switch("Accept Any Certificate", "For devices with self-signed certificates"),
+            remember: switch("Remember Password", "Store the password in the system keyring"),
+        };
+        rows.group.set_title("FTP Server");
+        rows.port.set_input_purpose(gtk::InputPurpose::Digits);
+        for r in [
+            rows.host.upcast_ref::<gtk::Widget>(),
+            rows.port.upcast_ref(),
+            rows.user.upcast_ref(),
+            rows.tls.upcast_ref(),
+            rows.passive.upcast_ref(),
+            rows.insecure.upcast_ref(),
+            rows.remember.upcast_ref(),
+        ] {
+            rows.group.add(r);
+        }
+        rows.set(&FtpCfg::default(), false);
+        rows
+    }
+
+    fn set(&self, c: &FtpCfg, no_store: bool) {
+        self.host.set_text(&c.host);
+        self.port.set_text(&c.port.to_string());
+        self.user.set_text(&c.user);
+        self.tls.set_selected(if c.tls == Tls::Explicit { 1 } else { 0 });
+        self.passive.set_active(c.passive);
+        self.insecure.set_active(c.insecure);
+        self.remember.set_active(!no_store);
+    }
+
+    fn get(&self) -> Result<FtpCfg, String> {
+        let c = FtpCfg {
+            host: text(&self.host).ok_or("Host is required")?,
+            port: text(&self.port).and_then(|p| p.parse().ok()).filter(|p| *p > 0).ok_or("Port must be 1-65535")?,
+            user: text(&self.user).unwrap_or_default(),
+            tls: if self.tls.selected() == 1 { Tls::Explicit } else { Tls::None },
+            passive: self.passive.is_active(),
+            insecure: self.insecure.is_active(),
+        };
+        c.check()?;
+        Ok(c)
     }
 }
 
@@ -401,6 +470,7 @@ struct Form {
     serial: SerialRows,
     net: NetRows,
     stream: StreamRows,
+    ftp: FtpRows,
     folder: bool,
 }
 
@@ -415,6 +485,7 @@ impl Form {
                 3 => Kind::Telnet,
                 4 => Kind::Tcp,
                 5 => Kind::Mosh,
+                6 => Kind::Ftp,
                 _ => Kind::Ssh,
             }
         }
@@ -429,6 +500,7 @@ impl Form {
         self.serial.group.set_visible(k == Kind::Serial);
         self.net.group.set_visible(net);
         self.stream.group.set_visible(net || k == Kind::Serial);
+        self.ftp.group.set_visible(k == Kind::Ftp);
         if k == Kind::Telnet && self.net.port.text().is_empty() {
             self.net.port.set_text("23");
         }
@@ -452,6 +524,10 @@ impl Form {
                 self.host.set_text(&s.host);
                 self.opts.set(&s.opts);
                 self.remember.set_active(!s.no_store);
+            }
+            Entry::Ftp(f) => {
+                self.kind.set_selected(6);
+                self.ftp.set(&f.cfg, f.no_store);
             }
             Entry::Telnet(n) | Entry::Tcp(n) => {
                 self.kind.set_selected(if matches!(e, Entry::Telnet(_)) { 3 } else { 4 });
@@ -496,6 +572,13 @@ impl Form {
             Kind::Mosh => Entry::Mosh(ssh(name, color)?),
             Kind::Telnet => Entry::Telnet(net(name, color)?),
             Kind::Tcp => Entry::Tcp(net(name, color)?),
+            Kind::Ftp => Entry::Ftp(store::FtpEntry {
+                name,
+                cfg: self.ftp.get()?,
+                color,
+                favorite,
+                no_store: !self.ftp.remember.is_active(),
+            }),
             Kind::Shell => Entry::Shell(Shell { name, dir: text(&self.dir), color, favorite }),
             Kind::Serial => Entry::Serial(store::Serial { name, cfg: self.serial.get(self.stream.get())?, color, favorite }),
             Kind::Folder => Entry::Folder(Folder {
@@ -539,6 +622,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
         serial: SerialRows::new(),
         net: NetRows::new(),
         stream: StreamRows::new(),
+        ftp: FtpRows::new(),
         folder,
     };
     form.conn.add(&form.host);
@@ -566,6 +650,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     page.add(&form.serial.group);
     page.add(&form.net.group);
     page.add(&form.stream.group);
+    page.add(&form.ftp.group);
 
     form.serial.set(&default_serial());
     form.stream.set(&StreamOpts::default());
@@ -626,7 +711,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     let mut texts = vec![&form.name, &form.host, &form.dir];
     texts.extend(form.opts.texts());
     texts.extend(form.serial.texts());
-    texts.extend([&form.net.host, &form.net.port]);
+    texts.extend([&form.net.host, &form.net.port, &form.ftp.host, &form.ftp.port, &form.ftp.user]);
     for r in texts {
         let s = submit.clone();
         r.connect_entry_activated(move |_| s());

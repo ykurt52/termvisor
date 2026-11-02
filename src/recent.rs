@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use gtk::glib;
 use serde::{Deserialize, Serialize};
 
+use crate::ftp::FtpCfg;
 use crate::store;
 use crate::term::{Kind, Launch, Stream};
 
@@ -27,6 +28,8 @@ pub struct Recent {
     pub mosh: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<Stream>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ftp: Option<FtpCfg>,
 }
 
 impl Recent {
@@ -39,6 +42,7 @@ impl Recent {
             mosh: (l.kind == Kind::Mosh).then(args),
             dir: l.dir.clone(),
             stream: l.stream.clone(),
+            ftp: l.ftp.clone(),
         }
     }
 
@@ -50,6 +54,8 @@ impl Recent {
             Launch::mosh(args.clone(), &self.target)
         } else if let Some(s) = &self.stream {
             Launch::stream(s.clone())
+        } else if let Some(c) = &self.ftp {
+            Launch::ftp(c.clone())
         } else {
             Launch::shell(self.dir.clone())
         };
@@ -58,7 +64,7 @@ impl Recent {
     }
 
     fn same(&self, o: &Recent) -> bool {
-        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream
+        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp
     }
 }
 

@@ -1,11 +1,13 @@
-// Transfer queue: uploads and downloads over SFTP on worker threads.
+// Transfer queue: uploads and downloads (SFTP or FTP) on worker threads.
 //
-// Each worker keeps one SFTP session per host command and reuses it. A job
-// is one top-level file or directory; directories are copied recursively.
-// Downloads go to "<name>.part" and are renamed when complete.
+// Each worker keeps one session per target and reuses it. A job is one
+// top-level file or directory; directories are copied recursively. Both
+// directions write "<name>.part" and rename it when complete; a .part left
+// by an interrupted transfer is continued from its size (resume).
 
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Seek, SeekFrom};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -13,8 +15,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::sftp::{self, Sftp};
-use crate::term::SftpCmd;
+use crate::remote::{Remote, Target};
+use crate::sftp;
 
 pub const WORKERS: usize = 4;
 
@@ -44,8 +46,8 @@ pub enum Dir {
     Down,
 }
 
-/// Command that opens an SFTP session (see term::sftp_command).
-pub type Cmd = Arc<SftpCmd>;
+/// Where jobs connect; shared between jobs of the same host.
+pub type Cmd = Arc<Target>;
 
 struct Job {
     id: u64,
@@ -53,6 +55,8 @@ struct Job {
     local: PathBuf,
     remote: String,
     cmd: Cmd,
+    /// Overwrite regardless of the conflict policy (remote edit uploads).
+    force: bool,
 }
 
 pub enum Update {
@@ -92,7 +96,7 @@ impl Queue {
     }
 
     /// Queues a transfer and returns its id.
-    pub fn add(&self, dir: Dir, local: PathBuf, remote: String, cmd: Cmd) -> u64 {
+    pub fn add(&self, dir: Dir, local: PathBuf, remote: String, cmd: Cmd, force: bool) -> u64 {
         let id = match self.next.lock() {
             Ok(mut n) => {
                 *n += 1;
@@ -100,7 +104,7 @@ impl Queue {
             }
             Err(_) => 0,
         };
-        let _ = self.jobs.send(Job { id, dir, local, remote, cmd });
+        let _ = self.jobs.send(Job { id, dir, local, remote, cmd, force });
         id
     }
 
@@ -159,7 +163,7 @@ fn worker(
     cancelled: Arc<Mutex<HashSet<u64>>>,
     conflict: Arc<AtomicU8>,
 ) {
-    let mut sessions: HashMap<Vec<String>, Sftp> = HashMap::new();
+    let mut sessions: HashMap<String, Box<dyn Remote>> = HashMap::new();
     loop {
         let job = match jobs.lock() {
             Ok(rx) => match rx.recv() {
@@ -168,16 +172,20 @@ fn worker(
             },
             Err(_) => return,
         };
-        let policy = Conflict::ALL.get(conflict.load(Ordering::Relaxed) as usize).copied().unwrap_or(Conflict::Rename);
+        let policy = if job.force {
+            Conflict::Overwrite
+        } else {
+            Conflict::ALL.get(conflict.load(Ordering::Relaxed) as usize).copied().unwrap_or(Conflict::Rename)
+        };
         let mut ctx = Ctx { id: job.id, tx: &tx, cancelled: &cancelled, conflict: policy, done: 0, skipped: 0, last: Instant::now() };
         if ctx.stop() {
             let _ = tx.send_blocking(Update::Failed { id: job.id, msg: "cancelled".into() });
             continue;
         }
 
-        let key = job.cmd.0.clone();
+        let key = job.cmd.key();
         if !sessions.contains_key(&key) {
-            match Sftp::spawn(&job.cmd.0, &job.cmd.1) {
+            match job.cmd.open() {
                 Ok(s) => {
                     sessions.insert(key.clone(), s);
                 }
@@ -188,14 +196,16 @@ fn worker(
             }
         }
         let Some(s) = sessions.get_mut(&key) else { continue };
-        let res = run(s, &job, &mut ctx);
+        let res = run(s.as_mut(), &job, &mut ctx);
         match res {
             Ok(()) => {
                 let _ = tx.send_blocking(Update::Done { id: job.id, bytes: ctx.done, skipped: ctx.skipped });
             }
             Err(msg) => {
-                // A broken pipe leaves the session unusable; start fresh next time.
-                if msg != "cancelled" && !msg.starts_with("no such file") && !msg.starts_with("permission denied") {
+                // A broken pipe or an aborted FTP transfer leaves the session
+                // unusable; start fresh next time.
+                let clean = msg == "cancelled" || msg.starts_with("no such file") || msg.starts_with("permission denied");
+                if !clean || !s.healthy() {
                     sessions.remove(&key);
                 }
                 let _ = tx.send_blocking(Update::Failed { id: job.id, msg });
@@ -204,7 +214,7 @@ fn worker(
     }
 }
 
-fn run(s: &mut Sftp, job: &Job, ctx: &mut Ctx) -> Result<(), String> {
+fn run(s: &mut dyn Remote, job: &Job, ctx: &mut Ctx) -> Result<(), String> {
     match job.dir {
         Dir::Down => {
             let total = remote_size(s, &job.remote)?;
@@ -219,7 +229,7 @@ fn run(s: &mut Sftp, job: &Job, ctx: &mut Ctx) -> Result<(), String> {
     }
 }
 
-fn remote_size(s: &mut Sftp, path: &str) -> Result<u64, String> {
+fn remote_size(s: &mut dyn Remote, path: &str) -> Result<u64, String> {
     let a = s.stat(path)?;
     if !a.is_dir() {
         return Ok(a.size.unwrap_or(0));
@@ -257,7 +267,13 @@ fn local_target(path: &Path, policy: Conflict) -> Option<PathBuf> {
     }
 }
 
-fn download(s: &mut Sftp, remote: &str, local: &Path, ctx: &mut Ctx) -> Result<(), String> {
+fn with_part(p: &Path) -> PathBuf {
+    let mut s = p.as_os_str().to_owned();
+    s.push(".part");
+    PathBuf::from(s)
+}
+
+fn download(s: &mut dyn Remote, remote: &str, local: &Path, ctx: &mut Ctx) -> Result<(), String> {
     if ctx.stop() {
         return Err("cancelled".into());
     }
@@ -275,14 +291,23 @@ fn download(s: &mut Sftp, remote: &str, local: &Path, ctx: &mut Ctx) -> Result<(
         ctx.done += a.size.unwrap_or(0);
         return Ok(());
     };
-    let part = {
-        let mut p = target.clone().into_os_string();
-        p.push(".part");
-        PathBuf::from(p)
+    let part = with_part(&target);
+    let size = a.size.unwrap_or(0);
+    // Continue a .part left by an earlier attempt when it is shorter.
+    let start = match fs::metadata(&part) {
+        Ok(m) if m.len() < size => m.len(),
+        _ => 0,
     };
-    let mut f = File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+    let mut f = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(start > 0)
+        .truncate(start == 0)
+        .open(&part)
+        .map_err(|e| format!("{}: {e}", part.display()))?;
+    ctx.done += start;
     let base = ctx.done;
-    let res = s.download(remote, &mut f, &mut |n| ctx.tick(base, n));
+    let res = s.download(remote, start, &mut f, &mut |n| ctx.tick(base, n));
     drop(f);
     match res {
         Ok(n) => {
@@ -294,13 +319,16 @@ fn download(s: &mut Sftp, remote: &str, local: &Path, ctx: &mut Ctx) -> Result<(
             Ok(())
         }
         Err(e) => {
-            let _ = fs::remove_file(&part);
+            // Keep the .part for a retry unless the user cancelled.
+            if e == "cancelled" {
+                let _ = fs::remove_file(&part);
+            }
             Err(e)
         }
     }
 }
 
-fn upload(s: &mut Sftp, local: &Path, remote: &str, ctx: &mut Ctx) -> Result<(), String> {
+fn upload(s: &mut dyn Remote, local: &Path, remote: &str, ctx: &mut Ctx) -> Result<(), String> {
     if ctx.stop() {
         return Err("cancelled".into());
     }
@@ -338,9 +366,33 @@ fn upload(s: &mut Sftp, local: &Path, remote: &str, ctx: &mut Ctx) -> Result<(),
             }
         }
     }
+    let part = format!("{target}.part");
+    let start = match s.stat(&part) {
+        Ok(a) if a.size.is_some_and(|n| n < meta.len()) => a.size.unwrap_or(0),
+        _ => 0,
+    };
     let mut f = File::open(local).map_err(|e| format!("{}: {e}", local.display()))?;
+    if start > 0 {
+        f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    }
+    ctx.done += start;
     let base = ctx.done;
-    let n = s.upload(&mut f, &target, meta.permissions().mode() & 0o777, &mut |n| ctx.tick(base, n))?;
+    let mode = meta.permissions().mode() & 0o777;
+    let res = s.upload(&mut f, &part, mode, start, &mut |n| ctx.tick(base, n));
+    let n = match res {
+        Ok(n) => n,
+        Err(e) => {
+            if e == "cancelled" {
+                let _ = s.remove(&part);
+            }
+            return Err(e);
+        }
+    };
+    // Rename fails over an existing file on some servers; clear it first.
+    if s.stat(&target).is_ok() {
+        s.remove(&target)?;
+    }
+    s.rename(&part, &target)?;
     ctx.done = base + n;
     Ok(())
 }
@@ -353,7 +405,7 @@ mod tests {
         ["/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"]
             .iter()
             .find(|p| Path::new(p).exists())
-            .map(|p| Arc::new((vec![p.to_string()], Vec::new())))
+            .map(|p| Arc::new(Target::Sftp((vec![p.to_string()], Vec::new()))))
     }
 
     #[test]
@@ -391,26 +443,42 @@ mod tests {
 
         let (q, rx) = Queue::start();
         let rdir = remote.join("src").to_string_lossy().into_owned();
-        let up = q.add(Dir::Up, src.clone(), rdir.clone(), cmd.clone());
+        let up = q.add(Dir::Up, src.clone(), rdir.clone(), cmd.clone(), false);
         assert_eq!(wait(&rx, up), Ok((100_005, 0)));
         assert_eq!(fs::read(remote.join("src/sub/b.bin")).expect("b").len(), 100_000);
 
-        let down = q.add(Dir::Down, back.join("src"), rdir.clone(), cmd.clone());
+        let down = q.add(Dir::Down, back.join("src"), rdir.clone(), cmd.clone(), false);
         assert_eq!(wait(&rx, down), Ok((100_005, 0)));
         assert_eq!(fs::read(back.join("src/a.txt")).expect("a"), b"alpha");
         assert!(!back.join("src/a.txt.part").exists());
 
         // Same download again keeps both copies by default.
-        let again = q.add(Dir::Down, back.join("src"), rdir.clone(), cmd.clone());
+        let again = q.add(Dir::Down, back.join("src"), rdir.clone(), cmd.clone(), false);
         assert!(wait(&rx, again).is_ok());
         assert!(back.join("src/a (1).txt").exists());
 
         q.set_conflict(Conflict::Skip);
-        let skip = q.add(Dir::Down, back.join("src"), rdir, cmd.clone());
+        let skip = q.add(Dir::Down, back.join("src"), rdir.clone(), cmd.clone(), false);
         assert_eq!(wait(&rx, skip).map(|r| r.1), Ok(2));
 
-        let missing = q.add(Dir::Down, back.join("x"), "/nonexistent/termvisor".into(), cmd);
+        let missing = q.add(Dir::Down, back.join("x"), "/nonexistent/termvisor".into(), cmd.clone(), false);
         assert!(wait(&rx, missing).is_err());
+
+        // Resume: a half-written .part is continued, not restarted.
+        let big: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+        fs::write(remote.join("big.bin"), &big).expect("big");
+        let local = root.join("big.bin");
+        fs::write(with_part(&local), &big[..120_000]).expect("part");
+        let r = q.add(Dir::Down, local.clone(), remote.join("big.bin").to_string_lossy().into_owned(), cmd.clone(), false);
+        assert_eq!(wait(&rx, r), Ok((300_000, 0)));
+        assert!(fs::read(&local).expect("read") == big);
+
+        let rbig = remote.join("up.bin");
+        fs::write(remote.join("up.bin.part"), &big[..50_000]).expect("rpart");
+        let u = q.add(Dir::Up, local, rbig.to_string_lossy().into_owned(), cmd.clone(), true);
+        assert_eq!(wait(&rx, u), Ok((300_000, 0)));
+        assert!(fs::read(&rbig).expect("read") == big);
+        assert!(!remote.join("up.bin.part").exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

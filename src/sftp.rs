@@ -426,22 +426,23 @@ impl Sftp {
         self.rmdir(path)
     }
 
-    /// Copies a remote file into `out`. Returns the byte count.
-    pub fn download(&mut self, remote: &str, out: &mut dyn Write, progress: Progress) -> Result<u64, String> {
+    /// Copies a remote file from byte `start` into `out`. Returns the bytes
+    /// written; `progress` gets the same count.
+    pub fn download(&mut self, remote: &str, start: u64, out: &mut dyn Write, progress: Progress) -> Result<u64, String> {
         let h = self.handle(OPEN, Out::default().str(remote).u32(OPEN_READ).u32(0))?;
-        let res = self.read_all(&h, out, progress);
+        let res = self.read_all(&h, start, out, progress);
         let _ = self.close(&h);
         res
     }
 
-    fn read_all(&mut self, h: &[u8], out: &mut dyn Write, progress: Progress) -> Result<u64, String> {
+    fn read_all(&mut self, h: &[u8], start: u64, out: &mut dyn Write, progress: Progress) -> Result<u64, String> {
         // id -> (offset, length) of requests in flight.
         let mut flight: HashMap<u32, (u64, u32)> = HashMap::new();
         // Received but not yet written, keyed by offset.
         let mut parked: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
         // Ranges that came back short and must be asked again.
         let mut again: Vec<(u64, u32)> = Vec::new();
-        let (mut next, mut done, mut eof_at) = (0u64, 0u64, u64::MAX);
+        let (mut next, mut pos, mut eof_at) = (start, start, u64::MAX);
         // On cancel we stop asking but still drain the replies in flight,
         // so the next request on this session gets its own reply.
         let mut cancel = false;
@@ -485,10 +486,10 @@ impl Sftp {
             if cancel {
                 continue;
             }
-            while let Some(chunk) = parked.remove(&done) {
+            while let Some(chunk) = parked.remove(&pos) {
                 out.write_all(&chunk).map_err(|e| e.to_string())?;
-                done += chunk.len() as u64;
-                if !progress(done) {
+                pos += chunk.len() as u64;
+                if !progress(pos - start) {
                     cancel = true;
                     break;
                 }
@@ -498,24 +499,25 @@ impl Sftp {
             return Err("cancelled".into());
         }
         out.flush().map_err(|e| e.to_string())?;
-        Ok(done)
+        Ok(pos - start)
     }
 
-    /// Writes `input` to a remote file (created or truncated, `mode` for new
-    /// files). Returns the byte count.
-    pub fn upload(&mut self, input: &mut dyn Read, remote: &str, mode: u32, progress: Progress) -> Result<u64, String> {
-        let flags = OPEN_WRITE | OPEN_CREAT | OPEN_TRUNC;
+    /// Writes `input` to a remote file at byte `start`. Start 0 creates or
+    /// truncates the file (`mode` for new files); a later start continues an
+    /// earlier upload. Returns the bytes written.
+    pub fn upload(&mut self, input: &mut dyn Read, remote: &str, mode: u32, start: u64, progress: Progress) -> Result<u64, String> {
+        let flags = if start == 0 { OPEN_WRITE | OPEN_CREAT | OPEN_TRUNC } else { OPEN_WRITE | OPEN_CREAT };
         let h = self.handle(OPEN, Out::default().str(remote).u32(flags).u32(ATTR_PERMISSIONS).u32(mode & 0o7777))?;
-        let res = self.write_all(&h, input, progress);
+        let res = self.write_all(&h, start, input, progress);
         let closed = self.close(&h);
         let n = res?;
         closed?;
         Ok(n)
     }
 
-    fn write_all(&mut self, h: &[u8], input: &mut dyn Read, progress: Progress) -> Result<u64, String> {
+    fn write_all(&mut self, h: &[u8], start: u64, input: &mut dyn Read, progress: Progress) -> Result<u64, String> {
         let mut flight = 0usize;
-        let (mut off, mut acked) = (0u64, 0u64);
+        let (mut off, mut acked) = (start, 0u64);
         let mut sizes: HashMap<u32, u64> = HashMap::new();
         let mut buf = vec![0u8; CHUNK as usize];
         let mut end = false;
@@ -681,7 +683,7 @@ mod tests {
 
         let mut seen = 0;
         let up = s
-            .upload(&mut &data[..], &join(&d, "big.bin"), 0o644, &mut |n| {
+            .upload(&mut &data[..], &join(&d, "big.bin"), 0o644, 0, &mut |n| {
                 seen = n;
                 true
             })
@@ -691,19 +693,29 @@ mod tests {
         assert_eq!(fs::read(dir.join("big.bin")).expect("read"), data);
 
         let mut back = Vec::new();
-        let down = s.download(&join(&d, "big.bin"), &mut back, &mut |_| true).expect("download");
+        let down = s.download(&join(&d, "big.bin"), 0, &mut back, &mut |_| true).expect("download");
         assert_eq!(down, data.len() as u64);
         assert!(back == data);
 
         let mut empty = Vec::new();
         fs::write(dir.join("zero"), b"").expect("zero");
-        assert_eq!(s.download(&join(&d, "zero"), &mut empty, &mut |_| true), Ok(0));
+        assert_eq!(s.download(&join(&d, "zero"), 0, &mut empty, &mut |_| true), Ok(0));
 
-        let cancelled = s.download(&join(&d, "big.bin"), &mut Vec::new(), &mut |n| n < 100_000);
+        // Resume: second half only, both directions.
+        let half = 700_000u64;
+        let mut tail = Vec::new();
+        let n = s.download(&join(&d, "big.bin"), half, &mut tail, &mut |_| true).expect("resume down");
+        assert_eq!(n, data.len() as u64 - half);
+        assert!(tail[..] == data[half as usize..]);
+        s.upload(&mut &data[..half as usize], &join(&d, "part.bin"), 0o644, 0, &mut |_| true).expect("first half");
+        s.upload(&mut &data[half as usize..], &join(&d, "part.bin"), 0o644, half, &mut |_| true).expect("second half");
+        assert!(fs::read(dir.join("part.bin")).expect("read") == data);
+
+        let cancelled = s.download(&join(&d, "big.bin"), 0, &mut Vec::new(), &mut |n| n < 100_000);
         assert_eq!(cancelled, Err("cancelled".into()));
-        let up_cancel = s.upload(&mut &data[..], &join(&d, "c.bin"), 0o644, &mut |n| n < 100_000);
+        let up_cancel = s.upload(&mut &data[..], &join(&d, "c.bin"), 0o644, 0, &mut |n| n < 100_000);
         assert_eq!(up_cancel, Err("cancelled".into()));
-        let denied = s.upload(&mut &b"x"[..], "/proc/termvisor-denied", 0o644, &mut |_| true);
+        let denied = s.upload(&mut &b"x"[..], "/proc/termvisor-denied", 0o644, 0, &mut |_| true);
         assert!(denied.is_err());
         // The session still works after a cancel.
         assert!(s.stat(&join(&d, "big.bin")).is_ok());

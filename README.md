@@ -8,10 +8,10 @@ Specification: [docs/SPEC.md](docs/SPEC.md).
 Milestone 1 plus the UI shell:
 
 - Activity bar, side panel with session tree (local shell + hosts from `~/.ssh/config`)
-- Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`)
+- Quick connect bar (`user@host:port`, `ssh <args>`, `mosh host`, `/dev/ttyUSB0@115200`, `telnet://host`, `tcp://host:port`, `ftp://host`)
 - Serial, raw TCP and telnet panes: Text / Hex / MAVLink views, ASCII and hex send bar
 - Serial locking, mirror and auto-reconnect
-- SFTP file panel on the active SSH tab, transfer queue with progress
+- SFTP and FTP/FTPS file panel, transfer queue with resume, edit remote files locally
 - Tabs with nested split panes, start page when no tab is open
 - Bottom dock and status bar
 - Live theme switching

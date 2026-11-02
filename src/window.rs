@@ -17,7 +17,10 @@ use crate::pane;
 use crate::recover;
 use crate::streampane;
 use crate::recent::{self, Recent};
+use crate::ftp::FtpCfg;
+use crate::keyring;
 use crate::link::Eol;
+use crate::remote::Target;
 use crate::net::NetCfg;
 use crate::serial::SerialCfg;
 use crate::sessions::{self, Quick};
@@ -189,6 +192,57 @@ impl Ui {
         d.present(Some(&self.win));
     }
 
+    /// Opens an FTP server in the Files panel, asking for the password
+    /// unless it is anonymous or stored in the keyring.
+    fn open_ftp(&self, title: &str, cfg: FtpCfg, use_keyring: bool) {
+        let label = format!("{title} · {}", cfg.id());
+        let go = {
+            let (u, label, cfg) = (self.clone(), label.clone(), cfg.clone());
+            move |pass: String| {
+                u.sidebar.show("files");
+                u.sidebar.files.open_target(Target::Ftp(cfg.clone(), pass), &label);
+            }
+        };
+        if cfg.anonymous() {
+            return go(String::new());
+        }
+        let id = keyring::password_id(&cfg.id());
+        if use_keyring {
+            if let Some(p) = keyring::get(&id) {
+                return go(p);
+            }
+        }
+        let d = adw::AlertDialog::new(Some("FTP Password"), Some(&cfg.id()));
+        let pass = gtk::PasswordEntry::new();
+        pass.set_show_peek_icon(true);
+        pass.set_activates_default(true);
+        let remember = gtk::CheckButton::with_label("Remember in keyring");
+        remember.set_active(true);
+        remember.set_visible(use_keyring);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        body.append(&pass);
+        body.append(&remember);
+        d.set_extra_child(Some(&body));
+        d.add_responses(&[("cancel", "Cancel"), ("connect", "Connect")]);
+        d.set_response_appearance("connect", adw::ResponseAppearance::Suggested);
+        d.set_default_response(Some("connect"));
+        d.set_close_response("cancel");
+        let u = self.clone();
+        d.connect_response(None, move |_, r| {
+            if r != "connect" {
+                return;
+            }
+            let p = pass.text().to_string();
+            if remember.is_active() && use_keyring {
+                if let Err(e) = keyring::set(&id, &p) {
+                    u.toast(&e);
+                }
+            }
+            go(p);
+        });
+        d.present(Some(&self.win));
+    }
+
     fn connect_quick(&self) {
         let text = self.quick.text();
         match sessions::quick(&text) {
@@ -215,6 +269,10 @@ impl Ui {
                 self.open(&Launch::stream(s), true);
                 self.quick.set_text("");
             }
+            Some(Quick::Ftp(cfg)) => {
+                self.open(&Launch::ftp(cfg), true);
+                self.quick.set_text("");
+            }
             Some(Quick::Mosh(target)) => {
                 if !term::found("mosh") {
                     return self.toast("mosh is not installed (package: mosh)");
@@ -222,12 +280,20 @@ impl Ui {
                 self.open(&Launch::mosh(vec!["--".into(), target.clone()], &target), true);
                 self.quick.set_text("");
             }
-            None => self.toast("Use user@host[:port], ssh <args>, mosh host, /dev/ttyX[@baud], telnet://host, tcp://host:port"),
+            None => self.toast("Use user@host[:port], ssh <args>, mosh host, /dev/ttyX[@baud], telnet://host, tcp://host:port, ftp://host"),
         }
     }
 }
 
 fn open_tab(view: &adw::TabView, state: &Rc<State>, launch: &Launch) {
+    // FTP has no terminal; the window shows it in the Files panel.
+    if let Some(cfg) = &launch.ftp {
+        let arg = serde_json::to_string(&(launch.title.clone(), cfg, launch.keyring)).unwrap_or_default();
+        if let Some(w) = view.root().and_downcast::<adw::ApplicationWindow>() {
+            let _ = WidgetExt::activate_action(&w, "win.open-ftp", Some(&arg.to_variant()));
+        }
+        return;
+    }
     let (t, leaf) = pane::open(state, launch);
     let root = pane::root();
     root.append(&leaf);
@@ -398,6 +464,21 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         }
     }
 
+    // The Files panel follows the focused SSH tab's directory.
+    let (w, files, st) = (win.downgrade(), ui.sidebar.files.clone(), Rc::downgrade(state));
+    state.on_cwd(move |t| {
+        let (Some(win), Some(st)) = (w.upgrade(), st.upgrade()) else { return };
+        let focused = gtk::prelude::GtkWindowExt::focus(&win)
+            .and_then(|f| f.ancestor(vte::Terminal::static_type()))
+            .and_then(|w| w.downcast::<vte::Terminal>().ok());
+        if focused.as_ref() != Some(t) {
+            return;
+        }
+        if let (Some(l), Some(uri)) = (st.launch(t), t.current_directory_uri()) {
+            files.follow(&l, &uri);
+        }
+    });
+
     if let Some(msg) = state.notice.take() {
         ui.toast(&msg);
     }
@@ -478,6 +559,7 @@ fn add_actions(ui: &Ui) {
                 cfg.opts.eol = Eol::Crlf;
                 Entry::Telnet(store::Net { name: "Telnet".into(), cfg, ..Default::default() })
             }
+            Some("ftp") => Entry::Ftp(store::FtpEntry { name: "FTP".into(), ..Default::default() }),
             Some("tcp") => Entry::Tcp(store::Net {
                 name: "TCP".into(),
                 cfg: NetCfg { port: 5760, ..Default::default() },
@@ -490,6 +572,14 @@ fn add_actions(ui: &Ui) {
             }
         };
         editor::open(&u.win, &u.state, editor::Mode::New(Vec::new()), init);
+    });
+    action(ui, "open-ftp", Some(glib::VariantTy::STRING), |u, p| {
+        let parsed = p
+            .and_then(|v| v.get::<String>())
+            .and_then(|s| serde_json::from_str::<(String, FtpCfg, bool)>(&s).ok());
+        if let Some((title, cfg, keyring)) = parsed {
+            u.open_ftp(&title, cfg, keyring);
+        }
     });
     action(ui, "release-all", None, |u, _| u.release());
     action(ui, "import", None, |u, _| u.import());

@@ -13,7 +13,8 @@ use std::thread;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::sftp::{self, DirEntry, Sftp};
+use crate::remote::Target;
+use crate::sftp::{self, DirEntry};
 use crate::state::State;
 use crate::term::{self, Launch};
 use crate::transfers::{Cmd, Dir};
@@ -39,7 +40,7 @@ fn worker(cmd: Cmd) -> (mpsc::Sender<Req>, async_channel::Receiver<Rep>) {
     let (tx, rx) = mpsc::channel::<Req>();
     let (rtx, rrx) = async_channel::unbounded();
     let spawned = thread::Builder::new().name("sftp-browse".into()).spawn(move || {
-        let mut s = match Sftp::spawn(&cmd.0, &cmd.1) {
+        let mut s = match cmd.open() {
             Ok(s) => s,
             Err(e) => {
                 let _ = rtx.send_blocking(Rep::Failed(e));
@@ -84,6 +85,10 @@ struct Inner {
     title: gtk::Label,
     path: gtk::Entry,
     info: gtk::Label,
+    /// Watches for files opened with "Edit in Local Editor".
+    edits: RefCell<Vec<gio::FileMonitor>>,
+    /// Go where the SSH tab's shell goes (needs OSC 7 from the remote shell).
+    follow: Cell<bool>,
 }
 
 #[derive(Clone)]
@@ -183,7 +188,7 @@ impl Inner {
 
     fn queue(&self, dir: Dir, local: PathBuf, remote: String) {
         if let Some(cmd) = self.cmd.borrow().clone() {
-            self.state.xfers.add(dir, local, remote, cmd);
+            self.state.xfers.add(dir, local, remote, cmd, false);
         }
     }
 
@@ -195,12 +200,78 @@ impl Inner {
         }
     }
 
+    /// Opens a downloaded copy in the default app and uploads it on save.
+    fn watch_edit(self: &Rc<Self>, local: PathBuf, remote: String) {
+        let name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let file = gio::File::for_path(&local);
+        if let Err(e) = gio::AppInfo::launch_default_for_uri(&file.uri(), None::<&gio::AppLaunchContext>) {
+            self.say(&format!("no app opens {name}: {e}"), true);
+            return;
+        }
+        let mon = match file.monitor_file(gio::FileMonitorFlags::WATCH_MOVES, None::<&gio::Cancellable>) {
+            Ok(m) => m,
+            Err(e) => {
+                self.say(&format!("cannot watch {name}: {e}"), true);
+                return;
+            }
+        };
+        // Editors save in bursts (write, rename, chmod); upload once it settles.
+        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
+        let weak = Rc::downgrade(self);
+        mon.connect_changed(move |_, _, _, ev| {
+            use gio::FileMonitorEvent as E;
+            if !matches!(ev, E::ChangesDoneHint | E::Created | E::Renamed | E::MovedIn) {
+                return;
+            }
+            if let Some(id) = pending.take() {
+                id.remove();
+            }
+            let (w, l, r, p) = (weak.clone(), local.clone(), remote.clone(), pending.clone());
+            let id = glib::timeout_add_local_once(std::time::Duration::from_millis(700), move || {
+                p.take();
+                let Some(me) = w.upgrade() else { return };
+                let cmd = me.cmd.borrow().clone();
+                if let Some(cmd) = cmd {
+                    me.state.xfers.add(Dir::Up, l, r.clone(), cmd, true);
+                    me.say(&format!("uploading saved {}", r.rsplit('/').next().unwrap_or(&r)), false);
+                }
+            });
+            pending.replace(Some(id));
+        });
+        self.edits.borrow_mut().push(mon);
+        self.say(&format!("editing {name}; every save uploads it"), false);
+    }
+
     fn download(&self, items: Vec<DirEntry>, to: PathBuf) {
         for e in items {
             let remote = self.remote(&e.name);
             self.queue(Dir::Down, to.join(&e.name), remote);
         }
     }
+}
+
+/// Private folder for files opened in a local editor.
+fn edit_dir() -> Result<PathBuf, String> {
+    use std::os::unix::fs::DirBuilderExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let dir = glib::user_runtime_dir()
+        .join("termvisor")
+        .join("edit")
+        .join(format!("{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Remote path from an OSC 7 URI "file://host/some%20dir".
+fn uri_path(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let i = rest.find('/')?;
+    glib::Uri::unescape_string(&rest[i..], None::<&str>).map(|s| s.to_string())
 }
 
 fn downloads_dir() -> PathBuf {
@@ -312,6 +383,7 @@ fn context_menu(dir_selected: bool) -> gio::Menu {
     let a = gio::Menu::new();
     a.append(Some("Download"), Some("files.download"));
     a.append(Some("Download To…"), Some("files.download-to"));
+    a.append(Some("Edit in Local Editor"), Some("files.edit"));
     if dir_selected {
         a.append(Some("Open"), Some("files.open"));
     }
@@ -370,6 +442,12 @@ impl Files {
         ] {
             tools.append(&tool(icon, tip, action));
         }
+        let follow = gtk::ToggleButton::new();
+        follow.set_icon_name("mark-location-symbolic");
+        follow.add_css_class("flat");
+        follow.set_active(true);
+        follow.set_tooltip_text(Some("Follow the terminal's folder (remote shell must send OSC 7)"));
+        tools.append(&follow);
         let hidden = gtk::ToggleButton::new();
         hidden.set_icon_name("view-reveal-symbolic");
         hidden.add_css_class("flat");
@@ -412,8 +490,12 @@ impl Files {
             title,
             path: path.clone(),
             info,
+            edits: RefCell::default(),
+            follow: Cell::new(true),
         });
 
+        let me = inner.clone();
+        follow.connect_toggled(move |b| me.follow.set(b.is_active()));
         let me = inner.clone();
         hidden.connect_toggled(move |b| {
             me.hidden.set(b.is_active());
@@ -492,6 +574,33 @@ impl Files {
         Files { widget: page, inner }
     }
 
+    /// Shows `target` (e.g. an FTP server) under `title` and connects.
+    pub fn open_target(&self, target: Target, title: &str) {
+        let me = &self.inner;
+        me.target.replace(target.key());
+        me.cmd.replace(Some(Arc::new(target)));
+        me.req.take();
+        me.entries.borrow_mut().clear();
+        me.store.remove_all();
+        me.title.set_text(title);
+        me.page.set_visible_child_name("browse");
+        me.connect();
+    }
+
+    /// Goes to the folder an SSH tab's shell reported (OSC 7) when this
+    /// panel shows the same host and following is on.
+    pub fn follow(&self, launch: &Launch, uri: &str) {
+        let me = &self.inner;
+        if !me.follow.get() || *me.target.borrow() != launch.target || me.req.borrow().is_none() {
+            return;
+        }
+        if let Some(p) = uri_path(uri) {
+            if *me.cwd.borrow() != p {
+                me.cd(&p);
+            }
+        }
+    }
+
     /// Follows `launch` when it is an SSH session on a different host.
     pub fn attach(&self, launch: Option<&Launch>) {
         let Some(l) = launch else { return };
@@ -501,7 +610,7 @@ impl Files {
             return;
         }
         me.target.replace(l.target.clone());
-        me.cmd.replace(Some(Arc::new((argv, env))));
+        me.cmd.replace(Some(Arc::new(Target::Sftp((argv, env)))));
         me.req.take();
         me.entries.borrow_mut().clear();
         me.store.remove_all();
@@ -538,6 +647,36 @@ fn actions(me: &Rc<Inner>) -> gio::SimpleActionGroup {
         }
     }));
     add("download", Box::new(|me| me.download(me.selected(), downloads_dir())));
+    add("edit", Box::new(|me| {
+        let Some(e) = me.selected().into_iter().find(|e| !e.attrs.is_dir()) else { return };
+        let Some(cmd) = me.cmd.borrow().clone() else { return };
+        let dir = match edit_dir() {
+            Ok(d) => d,
+            Err(err) => return me.say(&err, true),
+        };
+        let (remote, local) = (me.remote(&e.name), dir.join(&e.name));
+        me.say(&format!("opening {}…", e.name), false);
+        let (tx, rx) = async_channel::bounded(1);
+        let (r, l) = (remote.clone(), local.clone());
+        let spawned = thread::Builder::new().name("sftp-edit".into()).spawn(move || {
+            let res = cmd.open().and_then(|mut s| {
+                let mut f = std::fs::File::create(&l).map_err(|e| e.to_string())?;
+                s.download(&r, 0, &mut f, &mut |_| true)
+            });
+            let _ = tx.send_blocking(res);
+        });
+        if spawned.is_err() {
+            return me.say("cannot start download", true);
+        }
+        let m = me.clone();
+        glib::spawn_future_local(async move {
+            match rx.recv().await {
+                Ok(Ok(_)) => m.watch_edit(local, remote),
+                Ok(Err(err)) => m.say(&err, true),
+                Err(_) => {}
+            }
+        });
+    }));
     add("download-to", Box::new(|me| {
         let items = me.selected();
         if items.is_empty() {
@@ -640,4 +779,16 @@ fn actions(me: &Rc<Inner>) -> gio::SimpleActionGroup {
         d.present(Some(&me.page));
     }));
     g
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uri_path;
+
+    #[test]
+    fn osc7_uri() {
+        assert_eq!(uri_path("file://board/home/root/my%20dir").as_deref(), Some("/home/root/my dir"));
+        assert_eq!(uri_path("file:///tmp").as_deref(), Some("/tmp"));
+        assert_eq!(uri_path("http://x/y"), None);
+    }
 }

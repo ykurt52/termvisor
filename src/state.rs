@@ -13,6 +13,8 @@ use crate::term::Launch;
 use crate::theme::{self, Theme};
 use crate::xfers::Xfers;
 
+type TermFn = Box<dyn Fn(&vte::Terminal)>;
+
 pub struct State {
     pub themes: Vec<Theme>,
     pub cfg: RefCell<Settings>,
@@ -21,6 +23,8 @@ pub struct State {
     /// Transfer queue and list, shared by all windows.
     pub xfers: Rc<Xfers>,
     listeners: RefCell<Vec<Box<dyn Fn()>>>,
+    /// Called when a terminal's shell reports a new directory (OSC 7).
+    cwd_listeners: RefCell<Vec<TermFn>>,
     /// One-time message for the first window (e.g. startup cleanup).
     pub notice: RefCell<Option<String>>,
     terms: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Launch)>>,
@@ -49,6 +53,7 @@ impl State {
             xfers: Xfers::new(),
             listeners: RefCell::new(Vec::new()),
             notice: RefCell::new(None),
+            cwd_listeners: RefCell::new(Vec::new()),
             terms: RefCell::new(Vec::new()),
             css,
         });
@@ -112,6 +117,16 @@ impl State {
         self.cfg.borrow_mut().restore_tabs = on;
         if let Err(e) = self.cfg.borrow().save() {
             crate::warn(&format!("save settings: {e}"));
+        }
+    }
+
+    pub fn on_cwd(&self, f: impl Fn(&vte::Terminal) + 'static) {
+        self.cwd_listeners.borrow_mut().push(Box::new(f));
+    }
+
+    pub fn cwd_changed(&self, t: &vte::Terminal) {
+        for f in self.cwd_listeners.borrow().iter() {
+            f(t);
         }
     }
 
