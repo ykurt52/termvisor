@@ -32,6 +32,25 @@ fn switch(title: &str, subtitle: &str, on: bool) -> adw::SwitchRow {
     r
 }
 
+/// Fixed-width font families, sorted; `keep` is added when missing.
+fn mono_families(w: &gtk::Widget, keep: &str) -> Vec<String> {
+    let mut list: Vec<String> = w
+        .pango_context()
+        .list_families()
+        .iter()
+        .filter(|f| f.is_monospace())
+        .map(|f| f.name().to_string())
+        // Fonts that report fixed width but are not for text.
+        .filter(|n| !n.contains("Emoji") && !n.contains("MathJax") && !n.contains("SignWriting"))
+        .collect();
+    if !list.iter().any(|n| n == keep) {
+        list.push(keep.to_string());
+    }
+    list.sort_by_key(|n| n.to_lowercase());
+    list.dedup();
+    list
+}
+
 fn names(state: &State) -> Vec<String> {
     state.themes().into_iter().map(|t| t.name).collect()
 }
@@ -100,24 +119,29 @@ fn appearance(state: &Rc<State>, dlg: &adw::PreferencesDialog) -> adw::Preferenc
 
     let term = adw::PreferencesGroup::new();
     term.set_title("Terminal");
-    let font_row = adw::ActionRow::new();
-    font_row.set_title("Font");
-    let fd = gtk::FontDialog::new();
-    fd.set_title("Terminal Font");
-    // Only fixed-width fonts make sense in a terminal.
-    let mono = gtk::CustomFilter::new(|o| o.downcast_ref::<gtk::pango::FontFace>().is_some_and(|f| f.family().is_monospace()));
-    fd.set_filter(Some(&mono));
-    let font = gtk::FontDialogButton::new(Some(fd));
-    font.set_font_desc(&gtk::pango::FontDescription::from_string(&cfg.font));
-    font.set_valign(gtk::Align::Center);
-    font_row.add_suffix(&font);
-    let st = state.clone();
-    font.connect_font_desc_notify(move |b| {
-        if let Some(d) = b.font_desc() {
-            st.edit_cfg(|c| c.font = d.to_string());
+    // Fixed-width families straight from Pango: instant, unlike the
+    // general font dialog, which prepares a preview of every face first.
+    let desc = gtk::pango::FontDescription::from_string(&cfg.font);
+    let current = desc.family().map(|f| f.to_string()).unwrap_or_else(|| "Monospace".into());
+    let families = mono_families(dlg.upcast_ref(), &current);
+    let family = combo("Font", &families, index(&families, &current));
+    family.set_enable_search(true);
+    let size = adw::SpinRow::with_range(6.0, 48.0, 1.0);
+    size.set_title("Font Size");
+    let points = f64::from(desc.size()) / f64::from(gtk::pango::SCALE);
+    size.set_value(if points > 0.0 { points } else { 11.0 });
+    let apply = {
+        let (st, family, size, families) = (state.clone(), family.clone(), size.clone(), families.clone());
+        move || {
+            let Some(f) = families.get(family.selected() as usize) else { return };
+            let font = format!("{f} {}", size.value() as u32);
+            st.edit_cfg(|c| c.font = font);
             st.apply_terminal_prefs();
         }
-    });
+    };
+    let a = apply.clone();
+    family.connect_selected_notify(move |_| a());
+    size.connect_value_notify(move |_| apply());
     let lines = adw::SpinRow::with_range(1000.0, 1_000_000.0, 1000.0);
     lines.set_title("Scrollback Lines");
     lines.set_value(cfg.scrollback as f64);
@@ -134,7 +158,8 @@ fn appearance(state: &Rc<State>, dlg: &adw::PreferencesDialog) -> adw::Preferenc
         let n = RENDERERS[(c.selected() as usize).min(RENDERERS.len() - 1)];
         st.edit_cfg(|cfg| cfg.renderer = n.into());
     });
-    term.add(&font_row);
+    term.add(&family);
+    term.add(&size);
     term.add(&lines);
     term.add(&renderer);
     page.add(&term);

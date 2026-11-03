@@ -148,8 +148,21 @@ const SPANS: [(&str, Span); 8] = [
 const SEPS: [(&str, Option<char>); 6] =
     [("Auto", None), (", comma", Some(',')), ("| bar", Some('|')), ("; semicolon", Some(';')), ("Tab", Some('\t')), (": colon", Some(':'))];
 
-/// Position of a sample across the plot, 0..1.
-type XPos = Box<dyn Fn(&Sample) -> f64>;
+/// Range `(a, b)` scaled by `k` around the point at `frac` (0..1) of it;
+/// that point stays where it is on screen.
+pub fn zoomed((a, b): (f64, f64), frac: f64, k: f64) -> (f64, f64) {
+    let at = a + frac.clamp(0.0, 1.0) * (b - a);
+    (at - (at - a) * k, at + (b - at) * k)
+}
+
+/// A shown range on one axis.
+type Range = (f64, f64);
+
+/// Plot area margins (axis labels).
+const LEFT: f64 = 58.0;
+const RIGHT: f64 = 10.0;
+const TOP: f64 = 8.0;
+const BOTTOM: f64 = 20.0;
 
 struct Sample {
     /// Seconds since the plot started.
@@ -179,6 +192,12 @@ pub struct Plot {
     /// Last drawn Y range, for Lock Y.
     drawn: Cell<(f64, f64)>,
     hover: Cell<Option<f64>>,
+    /// Zoomed X range (seconds or sample numbers); None follows the span.
+    zoom: Cell<Option<(f64, f64)>>,
+    /// Last pointer position over the plot.
+    pointer: Cell<(f64, f64)>,
+    pause_button: RefCell<Option<gtk::ToggleButton>>,
+    lock_button: RefCell<Option<gtk::ToggleButton>>,
     /// Values for the legend, found while drawing and shown by the timer
     /// (changing labels while drawing would relayout mid-frame).
     readout: RefCell<Vec<Option<f64>>>,
@@ -308,45 +327,140 @@ impl Plot {
         if self.paused.get() { self.frozen.get() } else { self.start.elapsed().as_secs_f64() }
     }
 
-    /// Samples in view: (first index, x of a sample as 0..1).
-    fn view(&self, d: &VecDeque<Sample>) -> (usize, XPos) {
+    /// Position of a sample on the X axis: seconds or sample number.
+    fn key(&self, s: &Sample) -> f64 {
+        match self.span.get() {
+            Span::Secs(_) => s.t,
+            Span::Samples(_) => s.n as f64,
+        }
+    }
+
+    /// Shown X range: the zoom, else the span up to now (or the pause).
+    fn window(&self, d: &VecDeque<Sample>) -> (f64, f64) {
+        if let Some(z) = self.zoom.get() {
+            return z;
+        }
         match self.span.get() {
             Span::Secs(w) => {
                 let end = self.now();
-                let from = d.partition_point(|s| s.t < end - w);
-                (from, Box::new(move |s: &Sample| (s.t - (end - w)) / w))
+                (end - w, end)
             }
             Span::Samples(n) => {
                 let last = if self.paused.get() {
                     d.iter().rev().find(|s| s.t <= self.frozen.get()).map(|s| s.n).unwrap_or(0)
                 } else {
                     d.back().map(|s| s.n).unwrap_or(0)
-                };
-                let first = last.saturating_sub(n as u64 - 1);
-                let from = d.partition_point(|s| s.n < first);
-                let w = (n - 1).max(1) as f64;
-                (from, Box::new(move |s: &Sample| (s.n as f64 - first as f64) / w))
+                } as f64;
+                (last - (n.max(2) - 1) as f64, last)
             }
         }
+    }
+
+    /// Indices of the samples inside `window`.
+    fn view(&self, d: &VecDeque<Sample>, (a, b): (f64, f64)) -> (usize, usize) {
+        let from = d.partition_point(|s| self.key(s) < a);
+        let to = d.partition_point(|s| self.key(s) <= b);
+        (from, to.max(from))
+    }
+
+    /// Stops following new data (Pause, zoom or pan).
+    fn freeze(&self) {
+        if self.paused.get() {
+            return;
+        }
+        self.frozen.set(self.start.elapsed().as_secs_f64());
+        self.paused.set(true);
+        if let Some(b) = self.pause_button.borrow().as_ref() {
+            b.set_active(true);
+        }
+    }
+
+    /// Back to following new data, unzoomed, with the Y axis automatic.
+    fn live(&self) {
+        self.zoom.set(None);
+        self.paused.set(false);
+        self.lock.set(None);
+        if let Some(b) = self.pause_button.borrow().as_ref() {
+            b.set_active(false);
+        }
+        if let Some(b) = self.lock_button.borrow().as_ref() {
+            b.set_active(false);
+        }
+        self.area.queue_draw();
+    }
+
+    /// Mouse wheel: zoom both axes around the pointer, so the point under
+    /// it stays put (Shift: time axis only, Ctrl: Y axis only).
+    fn wheel(&self, x: f64, y: f64, dy: f64, only_x: bool, only_y: bool) {
+        let k = if dy < 0.0 { 0.8 } else { 1.25 };
+        let (w, h) = (f64::from(self.area.width()), f64::from(self.area.height()));
+        let pw = w - LEFT - RIGHT;
+        let ph = h - TOP - BOTTOM;
+        if pw < 20.0 || ph < 20.0 {
+            return;
+        }
+        if !only_x {
+            // A fixed Y range: auto scaling would move the point vertically.
+            let (nlo, nhi) = zoomed(self.drawn.get(), 1.0 - (y - TOP) / ph, k);
+            if nhi - nlo > 1e-9 {
+                self.lock.set(Some((nlo, nhi)));
+                if let Some(b) = self.lock_button.borrow().as_ref() {
+                    b.set_active(true);
+                }
+            }
+        }
+        if !only_y {
+            self.freeze();
+            let (na, nb) = zoomed(self.window(&self.data.borrow()), (x - LEFT) / pw, k);
+            let least = match self.span.get() {
+                Span::Secs(_) => 0.005,
+                Span::Samples(_) => 4.0,
+            };
+            if nb - na >= least {
+                self.zoom.set(Some((na, nb)));
+            }
+        }
+        self.area.queue_draw();
+    }
+
+    /// Drag by (`dx`, `dy`) pixels from the ranges at the start of the
+    /// drag: `x` on the time axis, `y` on the value axis.
+    fn pan(&self, x: (f64, f64), y: (f64, f64), dx: f64, dy: f64) {
+        let pw = f64::from(self.area.width()) - LEFT - RIGHT;
+        let ph = f64::from(self.area.height()) - TOP - BOTTOM;
+        if pw < 20.0 || ph < 20.0 {
+            return;
+        }
+        if dx != 0.0 {
+            self.freeze();
+            let shift = -dx / pw * (x.1 - x.0);
+            self.zoom.set(Some((x.0 + shift, x.1 + shift)));
+        }
+        if dy != 0.0 {
+            // Dragging down moves the curves down: the range moves up.
+            let shift = dy / ph * (y.1 - y.0);
+            self.lock.set(Some((y.0 + shift, y.1 + shift)));
+            if let Some(b) = self.lock_button.borrow().as_ref() {
+                b.set_active(true);
+            }
+        }
+        self.area.queue_draw();
     }
 
     fn draw(&self, a: &gtk::DrawingArea, cr: &gtk::cairo::Context, w: i32, h: i32) {
         let fg = a.color();
         let (fr, fgc, fb) = (f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()));
-        let (left, right, top, bottom) = (58.0, 10.0, 8.0, 20.0);
+        let (left, right, top, bottom) = (LEFT, RIGHT, TOP, BOTTOM);
         let (pw, ph) = (f64::from(w) - left - right, f64::from(h) - top - bottom);
         if pw < 20.0 || ph < 20.0 {
             return;
         }
         let d = self.data.borrow();
         let shown = self.shown.borrow().clone();
-        let (from, xf) = self.view(&d);
-        let to = match self.span.get() {
-            Span::Secs(_) if self.paused.get() => d.partition_point(|s| s.t <= self.frozen.get()),
-            Span::Samples(_) if self.paused.get() => d.partition_point(|s| s.t <= self.frozen.get()),
-            _ => d.len(),
-        };
-        let vis = &d.range(from..to.max(from)).collect::<Vec<_>>();
+        let (xa, xb) = self.window(&d);
+        let (from, to) = self.view(&d, (xa, xb));
+        let xf = |s: &Sample| (self.key(s) - xa) / (xb - xa).max(1e-12);
+        let vis = &d.range(from..to).collect::<Vec<_>>();
 
         // Y range: locked, else the shown values.
         let (lo, hi) = self.lock.get().unwrap_or_else(|| {
@@ -391,9 +505,12 @@ impl Plot {
             v += step;
         }
         cr.set_source_rgba(fr, fgc, fb, 0.65);
-        let xlabel = match self.span.get() {
-            Span::Secs(w) => format!("last {w:.0} s"),
-            Span::Samples(n) => format!("last {n} samples"),
+        let xlabel = match (self.zoom.get(), self.span.get()) {
+            (Some((a, b)), Span::Secs(_)) => format!("{:.3} s shown · wheel: zoom (Shift: time, Ctrl: Y) · drag: move · double-click: live", b - a),
+            (Some((a, b)), Span::Samples(_)) => format!("samples {a:.0}–{b:.0} · wheel: zoom (Shift: time, Ctrl: Y) · drag: move · double-click: live"),
+            (None, _) if self.paused.get() => "paused · wheel: zoom · drag: move · double-click: live".to_string(),
+            (None, Span::Secs(w)) => format!("last {w:.0} s · wheel: zoom"),
+            (None, Span::Samples(n)) => format!("last {n} samples · wheel: zoom"),
         };
         cr.move_to(left, f64::from(h) - 5.0);
         let _ = cr.show_text(&xlabel);
@@ -585,6 +702,10 @@ pub fn build(out: &Rc<RefCell<output::Out>>) -> Rc<Plot> {
         lock: Cell::new(None),
         drawn: Cell::new((0.0, 1.0)),
         hover: Cell::new(None),
+        zoom: Cell::new(None),
+        pointer: Cell::new((0.0, 0.0)),
+        pause_button: RefCell::new(Some(pause.clone())),
+        lock_button: RefCell::new(Some(lock.clone())),
         readout: RefCell::default(),
         start: Instant::now(),
         last: Cell::new(0.0),
@@ -605,8 +726,9 @@ pub fn build(out: &Rc<RefCell<output::Out>>) -> Rc<Plot> {
     });
     let motion = gtk::EventControllerMotion::new();
     let w = Rc::downgrade(&p);
-    motion.connect_motion(move |_, x, _| {
+    motion.connect_motion(move |_, x, y| {
         if let Some(p) = w.upgrade() {
+            p.pointer.set((x, y));
             p.hover.set(Some(x));
             p.area.queue_draw();
         }
@@ -619,6 +741,52 @@ pub fn build(out: &Rc<RefCell<output::Out>>) -> Rc<Plot> {
         }
     });
     area.add_controller(motion);
+
+    // Wheel zooms around the pointer; Shift: time only, Ctrl: Y only.
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::DISCRETE);
+    let w = Rc::downgrade(&p);
+    scroll.connect_scroll(move |c, _, dy| {
+        let Some(p) = w.upgrade() else { return glib::Propagation::Proceed };
+        let state = c.current_event_state();
+        let (x, y) = p.pointer.get();
+        p.wheel(x, y, dy, state.contains(gtk::gdk::ModifierType::SHIFT_MASK), state.contains(gtk::gdk::ModifierType::CONTROL_MASK));
+        glib::Propagation::Stop
+    });
+    area.add_controller(scroll);
+
+    // Drag pans; double-click goes back to live.
+    let drag = gtk::GestureDrag::new();
+    // X and Y ranges when the drag started.
+    let start: Rc<Cell<(Range, Range)>> = Rc::default();
+    let moving = Rc::new(Cell::new(false));
+    let (w, st, mv) = (Rc::downgrade(&p), start.clone(), moving.clone());
+    drag.connect_drag_begin(move |_, _, _| {
+        if let Some(p) = w.upgrade() {
+            let y = p.lock.get().unwrap_or(p.drawn.get());
+            st.set((p.window(&p.data.borrow()), y));
+            mv.set(false);
+        }
+    });
+    let (w, st, mv) = (Rc::downgrade(&p), start, moving);
+    drag.connect_drag_update(move |_, dx, dy| {
+        let Some(p) = w.upgrade() else { return };
+        // A click (or a double-click) is not a drag.
+        if !mv.get() && dx.abs() < 3.0 && dy.abs() < 3.0 {
+            return;
+        }
+        mv.set(true);
+        let (x, y) = st.get();
+        p.pan(x, y, dx, dy);
+    });
+    area.add_controller(drag);
+    let click = gtk::GestureClick::new();
+    let w = Rc::downgrade(&p);
+    click.connect_pressed(move |_, n, _, _| {
+        if let (2, Some(p)) = (n, w.upgrade()) {
+            p.live();
+        }
+    });
+    area.add_controller(click);
 
     let w = Rc::downgrade(&p);
     sep.connect_selected_notify(move |d| {
@@ -636,15 +804,25 @@ pub fn build(out: &Rc<RefCell<output::Out>>) -> Rc<Plot> {
     let w = Rc::downgrade(&p);
     lock.connect_toggled(move |b| {
         if let Some(p) = w.upgrade() {
-            p.lock.set(b.is_active().then(|| p.drawn.get()));
+            // Ctrl+wheel sets its own range before turning this on.
+            if !b.is_active() {
+                p.lock.set(None);
+            } else if p.lock.get().is_none() {
+                p.lock.set(Some(p.drawn.get()));
+            }
             p.area.queue_draw();
         }
     });
     let w = Rc::downgrade(&p);
     pause.connect_toggled(move |b| {
         if let Some(p) = w.upgrade() {
-            p.frozen.set(p.start.elapsed().as_secs_f64());
-            p.paused.set(b.is_active());
+            if b.is_active() {
+                p.freeze();
+            } else {
+                // Unpausing goes back to the live view.
+                p.zoom.set(None);
+                p.paused.set(false);
+            }
             p.area.queue_draw();
         }
     });
@@ -766,6 +944,17 @@ mod tests {
         assert!(l.feed("1,2").is_empty());
         assert_eq!(l.feed(",3\r\n4,5,6\n7"), vec!["1,2,3".to_string(), "4,5,6".to_string()]);
         assert_eq!(l.feed(",8\n"), vec!["7,8".to_string()]);
+    }
+
+    #[test]
+    fn zoom_keeps_the_pointed_spot() {
+        let (a, b) = zoomed((0.0, 10.0), 0.25, 0.8);
+        assert!((a - 0.5).abs() < 1e-9 && (b - 8.5).abs() < 1e-9);
+        // The spot under the pointer (2.5) is at the same fraction after.
+        assert!(((2.5 - a) / (b - a) - 0.25).abs() < 1e-9);
+        let back = zoomed((a, b), 0.25, 1.25);
+        assert!((back.0 - 0.0).abs() < 1e-9 && (back.1 - 10.0).abs() < 1e-9);
+        assert_eq!(zoomed((0.0, 10.0), 2.0, 0.5), (5.0, 10.0));
     }
 
     #[test]

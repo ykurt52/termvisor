@@ -41,10 +41,23 @@ one.
 | Separator | Auto or a fixed one |
 | Span | Last 1, 5, 10, 30 or 60 seconds, or the last 200, 1000 or 5000 samples |
 | Lock Y | Keeps the current Y range (otherwise it follows the shown values) |
-| Pause | Freezes the view; samples are still kept |
+| Pause | Freezes the view; samples are still kept. Unpausing goes back to the live view |
 | Names… | Channel names, comma separated |
 | ⌫ | Clears the samples |
 | ⬇ | Saves all kept samples as CSV (`time_s,sample,<names>`) |
+
+## Zoom and pan
+
+| Mouse | Effect |
+|---|---|
+| Wheel | Zoom in or out around the pointer on both axes; the point under the pointer stays put. The view freezes and Lock Y turns on |
+| Shift + wheel | Zoom the time (or sample) axis only |
+| Ctrl + wheel | Zoom the Y axis only |
+| Drag | Move the view: left/right in time (the view freezes), up/down in value (Lock Y turns on) |
+| Double-click | Back to the live view with an automatic Y axis |
+
+While frozen, new samples are still collected; nothing is lost. The line
+under the plot tells how much is shown.
 
 The legend has a checkbox per channel to hide or show it, and its value:
 the latest one, or the one under the mouse pointer (a vertical line

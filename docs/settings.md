@@ -6,7 +6,7 @@ Menu → Preferences… or Ctrl+, . Changes apply and save at once.
 
 | Page | Contents |
 |---|---|
-| Appearance | Theme, follow system style, light/dark themes, theme editor, terminal font (monospace only), scrollback, renderer (restart), session themes |
+| Appearance | Theme, follow system style, light/dark themes, theme editor, terminal font (fixed-width families) and size, scrollback, renderer (restart), session themes |
 | Panes | Defaults for new panes (timestamps, highlight, log to file, log folder), restore tabs, panel on right, F1–F12 command buttons, adb program |
 | Keyboard | Shortcut of every window action |
 | Files | Opens settings.json, keybindings.json, the themes folder and the configuration folder |
