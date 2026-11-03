@@ -4,7 +4,7 @@
 |---|---|---|
 | Debian, Ubuntu 24.04+ | `.deb` built with cargo-deb | `[package.metadata.deb]` in `Cargo.toml` |
 | Arch Linux (AUR) | PKGBUILD from the release tarball | `packaging/arch/` |
-| Windows 10/11 x64 | installer (Inno Setup) and zip with the exe and the GTK runtime, built with MSYS2 | `packaging/windows/` |
+| Windows 10/11 x64 | installer (Inno Setup) and portable single exe, both with the GTK runtime, built with MSYS2 | `packaging/windows/` |
 | Desktop menu, software centers | Desktop file, AppStream metainfo, icon | `data/` |
 | Checks | GitHub Actions on every push and PR | `.github/workflows/ci.yml` |
 | Releases | GitHub Actions on a `v*` tag | `.github/workflows/release.yml` |
@@ -100,7 +100,7 @@ Built on a GitHub Windows runner with MSYS2 (UCRT64), which has GTK4,
 libadwaita and Rust as packages:
 
 ```bash
-pacman -S zip mingw-w64-ucrt-x86_64-{gtk4,libadwaita,librsvg,adwaita-icon-theme,pkgconf,rust}
+pacman -S zstd mingw-w64-ucrt-x86_64-{gtk4,libadwaita,librsvg,adwaita-icon-theme,pkgconf,rust,binutils}
 cargo build --release --locked
 packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
 ```
@@ -114,8 +114,32 @@ packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
 | `share/icons/` | Adwaita and hicolor icon themes |
 | `share/glib-2.0/schemas/` | compiled GSettings schemas |
 
-GTK finds `share/` and `lib/` next to the exe. Users unzip the folder
-anywhere and run `termvisor.exe`; nothing is installed.
+GTK finds `share/` and `lib/` next to the exe. The installer and the
+portable exe both ship this folder.
+
+`build.rs` puts the icon and the version (Properties → Details) into
+`termvisor.exe` through `packaging/windows/resource.rs`, with windres. When
+windres is missing the exe builds without them; CI sets
+`TERMVISOR_RC_REQUIRED=1` so that fails there instead.
+
+### Portable exe
+
+`portable.sh <bundle-dir> <out.exe>` packs the folder into a `.tar.zst`
+and builds the launcher in `packaging/windows/portable/` with it embedded:
+
+```bash
+packaging/windows/portable.sh dist/termvisor dist/termvisor-windows-x64_v1.0.3_portable.exe
+```
+
+The launcher is one exe of about 25 MB. On start it unpacks the bundle
+into `%LOCALAPPDATA%\termvisor\portable\<version>-<build>\` unless that
+folder is already there, starts `termvisor.exe` from it with the same
+arguments and exits. The first start takes a second or two, later starts
+are instant. Folders of other builds are removed once nothing runs from
+them. Settings and sessions are in the same place as with the installer.
+
+The launcher takes its version from termvisor's `Cargo.toml`. Its tests
+run on Linux: `cargo test --manifest-path packaging/windows/portable/Cargo.toml`.
 
 ### Installer
 
@@ -145,13 +169,13 @@ never change it. The Windows runner image has Inno Setup.
 
 | File | Content |
 |---|---|
-| `termvisor-windows-x64_v<version>.zip` | the bundle folder |
 | `termvisor-windows-x64_v<version>_setup.exe` | the installer |
+| `termvisor-windows-x64_v<version>_portable.exe` | the portable exe |
 
 CI uploads each as its own artifact on every push
 (`termvisor-windows-x64_v<version>_setup` and
-`termvisor-windows-x64_v<version>`); a `v*` tag attaches both files to
-the release.
+`termvisor-windows-x64_v<version>_portable`); a `v*` tag attaches both
+files to the release.
 
 The Windows code paths are type-checked on Linux too, see
 [windows.md](windows.md).
@@ -178,7 +202,7 @@ on pull requests and by hand. It has three jobs:
 |---|---|
 | Ubuntu 24.04, Rust 1.92 | clippy with warnings as errors, tests under a virtual display (so the GTK test runs), desktop and metainfo validation, release build, `.deb` as an artifact |
 | Arch Linux | build and tests in an `archlinux:latest` container with the distribution's Rust |
-| Windows (MSYS2 UCRT64) | release build, bundle, zip and installer as an artifact |
+| Windows (MSYS2 UCRT64) | release build, bundle, installer and portable exe as artifacts |
 
 ## Releasing
 
@@ -188,6 +212,6 @@ on pull requests and by hand. It has three jobs:
 2. Commit, then tag and push: `git tag v1.0.1 && git push origin refs/tags/v1.0.1`
    (full ref, since the `v1.0.1` branch has the same name).
 3. `release.yml` checks that the tag matches `Cargo.toml`, builds the
-   `.deb` and creates the GitHub release with it, adds the Windows zip and installer,
+   `.deb` and creates the GitHub release with it, adds the Windows installer and portable exe,
    then `apt.yml` publishes the APT repository.
 4. Update the AUR package (above).

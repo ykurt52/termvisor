@@ -1,0 +1,25 @@
+# Portable termvisor: one exe that carries the whole Windows bundle and
+# unpacks it on first start. See docs/packaging.md.
+[package]
+name = "termvisor-portable"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.92"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+ruzstd = "0.9"
+tar = { version = "0.4", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3

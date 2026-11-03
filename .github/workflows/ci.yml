@@ -74,6 +74,8 @@ jobs:
   windows:
     name: Windows (MSYS2 UCRT64)
     runs-on: windows-2025
+    env:
+      TERMVISOR_RC_REQUIRED: 1
     defaults:
       run:
         shell: msys2 {0}
@@ -85,7 +87,8 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            zip
+            zstd
+            mingw-w64-ucrt-x86_64-binutils
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-librsvg
@@ -98,13 +101,16 @@ jobs:
           rustc --version
           cargo build --release --locked
 
-      # Folder with the exe and the GTK runtime, zipped.
+      # Folder with the exe and the GTK runtime; the installer and the
+      # portable exe are both made from it.
       - name: Bundle
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           echo "VERSION=$version" >> "$GITHUB_ENV"
           packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
-          cd dist && zip -qr "termvisor-windows-x64_v${version}.zip" termvisor
+
+      - name: Portable
+        run: packaging/windows/portable.sh dist/termvisor "dist/termvisor-windows-x64_v${VERSION}_portable.exe"
 
       - name: Installer
         shell: pwsh
@@ -119,6 +125,6 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: termvisor-windows-x64_v${{ env.VERSION }}
-          path: dist/termvisor-windows-x64_v*.zip
+          name: termvisor-windows-x64_v${{ env.VERSION }}_portable
+          path: dist/termvisor-windows-x64_v*_portable.exe
           compression-level: 0

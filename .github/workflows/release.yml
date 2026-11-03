@@ -1,8 +1,8 @@
 name: Release
 
-# Pushing a tag like v1.0.1 builds the .deb and the Windows zip and
-# attaches them to a GitHub release with that name (the source tarball is
-# added by GitHub).
+# Pushing a tag like v1.0.3 builds the .deb, the Windows installer and the
+# portable exe and attaches them to a GitHub release with that name (the
+# source tarball is added by GitHub).
 on:
   push:
     tags: ["v*"]
@@ -47,6 +47,8 @@ jobs:
   windows:
     needs: deb
     runs-on: windows-2025
+    env:
+      TERMVISOR_RC_REQUIRED: 1
     steps:
       - uses: actions/checkout@v7
 
@@ -55,7 +57,8 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            zip
+            zstd
+            mingw-w64-ucrt-x86_64-binutils
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-librsvg
@@ -68,7 +71,7 @@ jobs:
         run: |
           cargo build --release --locked
           packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
-          cd dist && zip -qr "termvisor-windows-x64_${GITHUB_REF_NAME}.zip" termvisor
+          packaging/windows/portable.sh dist/termvisor "dist/termvisor-windows-x64_${GITHUB_REF_NAME}_portable.exe"
 
       - name: Installer
         shell: pwsh
@@ -78,7 +81,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item dist/termvisor-windows-x64_v*.zip, dist/termvisor-windows-x64_v*_setup.exe)
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item dist/termvisor-windows-x64_v*_portable.exe, dist/termvisor-windows-x64_v*_setup.exe)
 
   apt:
     needs: deb

@@ -101,8 +101,9 @@ Specification and milestones: [docs/SPEC.md](docs/SPEC.md).
 - Or the `.deb` from the releases page: `sudo apt install ./termvisor_*.deb`.
 - Arch: the `termvisor` AUR package.
 - Windows 10/11 (x64), from the releases page: run
-  `termvisor-windows-x64_v*_setup.exe`, or unzip `termvisor-windows-x64_v*.zip`
-  and run `termvisor.exe`. USB capture and mosh are Linux only.
+  `termvisor-windows-x64_v*_setup.exe` to install, or
+  `termvisor-windows-x64_v*_portable.exe` to run without installing.
+  USB capture and mosh are Linux only.
 
 Packaging details: [docs/packaging.md](docs/packaging.md).
 
