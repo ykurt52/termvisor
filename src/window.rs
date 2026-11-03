@@ -604,6 +604,7 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     panes.append(Some("Split Right"), Some("win.split-right"));
     panes.append(Some("Split Down"), Some("win.split-down"));
     panes.append(Some("Close Pane"), Some("win.close-pane"));
+    panes.append(Some("Plot Values"), Some("win.plot"));
 
     let view = gio::Menu::new();
     view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
@@ -800,6 +801,7 @@ fn add_actions(ui: &Ui) {
     on_term(ui, "close-pane", |_, t| pane::close(t));
     on_term(ui, "copy", |_, t| t.copy_clipboard_format(vte::Format::Text));
     on_term(ui, "paste", |_, t| t.paste_clipboard());
+    on_term(ui, "plot", |_, t| pane::toggle_plot(t));
     on_term(ui, "zoom-in", |_, t| t.set_font_scale((t.font_scale() * 1.1).min(4.0)));
     on_term(ui, "zoom-out", |_, t| t.set_font_scale((t.font_scale() / 1.1).max(0.25)));
     on_term(ui, "zoom-reset", |_, t| t.set_font_scale(1.0));

@@ -87,6 +87,7 @@ Details in docs/recovery.md.
 - Regex search in scrollback.
 - Highlight rules: regex to color, per profile.
 - Per-line timestamps (toggle).
+- Live multichannel plot of separated values printed by a pane.
 - Per-session logging to file, raw or ANSI-stripped.
 - Copy on select, right-click paste (optional). Confirm multi-line paste.
 - Clickable URLs and file paths.

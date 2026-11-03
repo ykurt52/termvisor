@@ -2,13 +2,13 @@
 //
 // Layout: tab root (Box) -> Paned* -> leaf (ScrolledWindow) -> Terminal.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::{glib, prelude::*};
 use vte::prelude::*;
 
-use crate::{logcat, multi, streampane, toolpane, usbpane};
+use crate::{logcat, multi, output, plot, streampane, toolpane, usbpane};
 use crate::state::State;
 use crate::term::{self, Kind, Launch};
 
@@ -174,6 +174,43 @@ fn hooked(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
         }
     });
     t
+}
+
+thread_local! {
+    /// Plots shown above panes.
+    static PLOTS: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Rc<plot::Plot>)>> = const { RefCell::new(Vec::new()) };
+}
+
+const PLOT_SPLIT: &str = "plot-split";
+
+/// Shows or hides a live plot of the numbers `term` prints, above it.
+pub fn toggle_plot(term: &vte::Terminal) {
+    let Some(overlay) = leaf_of(term).and_downcast::<gtk::Overlay>() else { return };
+    let Some(child) = overlay.child() else { return };
+    if let Some(split) = child.downcast_ref::<gtk::Paned>().filter(|p| p.has_css_class(PLOT_SPLIT)) {
+        let content = split.end_child();
+        split.set_end_child(None::<&gtk::Widget>);
+        overlay.set_child(content.as_ref());
+        PLOTS.with(|v| v.borrow_mut().retain(|(w, _)| w.upgrade().is_some_and(|t| &t != term)));
+        term.grab_focus();
+        return;
+    }
+    let Some(out) = output::of(term) else { return };
+    let p = plot::build(&out);
+    let split = gtk::Paned::new(gtk::Orientation::Vertical);
+    split.add_css_class(PLOT_SPLIT);
+    split.set_wide_handle(true);
+    overlay.set_child(None::<&gtk::Widget>);
+    split.set_start_child(Some(&p.widget));
+    split.set_end_child(Some(&child));
+    split.set_position((overlay.height() * 45 / 100).max(220));
+    overlay.set_child(Some(&split));
+    PLOTS.with(|v| {
+        let mut v = v.borrow_mut();
+        v.retain(|(w, _)| w.upgrade().is_some());
+        v.push((term.downgrade(), p));
+    });
+    term.grab_focus();
 }
 
 /// Splits the pane of `term`, new terminal goes right or below.

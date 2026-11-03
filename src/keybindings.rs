@@ -16,6 +16,7 @@ pub const ACTIONS: &[(&str, &str, &[&str])] = &[
     ("win.close-pane", "Close Pane", &["<Ctrl><Shift>w"]),
     ("win.split-right", "Split Right", &["<Ctrl><Shift>e"]),
     ("win.split-down", "Split Down", &["<Ctrl><Shift>o"]),
+    ("win.plot", "Plot Values", &["<Ctrl><Shift>g"]),
     ("win.copy", "Copy", &["<Ctrl><Shift>c"]),
     ("win.paste", "Paste", &["<Ctrl><Shift>v"]),
     ("win.zoom-in", "Zoom In", &["<Ctrl>plus", "<Ctrl>equal"]),

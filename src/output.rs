@@ -498,7 +498,14 @@ pub struct Out {
     /// Text of the output without escape sequences, one buffer per running
     /// macro.
     pub taps: Vec<Rc<RefCell<String>>>,
+    /// Get the same text as it arrives (the plot).
+    pub watchers: Vec<std::rc::Weak<dyn Watch>>,
     tap_strip: Strip,
+}
+
+/// Receives a pane's output as text without escape sequences.
+pub trait Watch {
+    fn text(&self, text: &str);
 }
 
 impl Out {
@@ -511,12 +518,17 @@ impl Out {
 
     /// Logs without screen processing (hex and MAVLink views).
     pub fn record(&mut self, data: &[u8]) {
-        if !self.taps.is_empty() {
+        self.watchers.retain(|w| w.strong_count() > 0);
+        if !self.taps.is_empty() || !self.watchers.is_empty() {
             let mut text = Vec::with_capacity(data.len());
             self.tap_strip.feed(data, &mut text);
             let text = String::from_utf8_lossy(&text);
             for tap in &self.taps {
                 tap.borrow_mut().push_str(&text);
+            }
+            let watchers: Vec<_> = self.watchers.iter().filter_map(|w| w.upgrade()).collect();
+            for w in watchers {
+                w.text(&text);
             }
         }
         let stamps = self.filter.stamps;
@@ -556,6 +568,7 @@ pub fn attach(t: &vte::Terminal, title: &str, cfg: &settings::Settings) -> Rc<Re
         filter: Filter::new(cfg.timestamps, cfg.highlight),
         log: None,
         taps: Vec::new(),
+        watchers: Vec::new(),
         tap_strip: Strip::default(),
     };
     if let Err(e) = out.set_mode(cfg.log) {

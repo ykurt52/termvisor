@@ -25,6 +25,7 @@ mod palette;
 mod prefs;
 mod pty;
 mod pane;
+mod plot;
 mod net;
 mod nettools;
 mod output;

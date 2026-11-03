@@ -18,6 +18,7 @@
       <li>Serial ports with locking, mirrors, hex and MAVLink views, XMODEM, YMODEM and ZMODEM</li>
       <li>SFTP and FTP file panel with a transfer queue and resume</li>
       <li>Command buttons, macros with expect, multi-exec to several panes</li>
+      <li>Live multichannel plot of values a device prints</li>
       <li>Timestamps, regex highlighting and logging in every pane</li>
       <li>SSH tunnels, TFTP and HTTP servers, port scanner, ping graph, Wake-on-LAN</li>
       <li>Passive USB capture with decoders for USB serial adapters, HID and mass storage</li>
@@ -33,6 +34,10 @@
     <screenshot type="default">
       <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/console.png</image>
       <caption>Serial console with highlighting, timestamps and command buttons</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/plot.png</image>
+      <caption>Live plot of four channels above a serial pane</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/ykurt52/termvisor/main/docs/images/usb-capture.png</image>

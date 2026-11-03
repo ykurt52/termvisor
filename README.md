@@ -15,6 +15,13 @@ delay between lines, or a raw MAVLink frame in hex. Serial ports are
 locked against other programs, can be mirrored read-only, and transfer
 files with XMODEM, YMODEM and ZMODEM.
 
+**Live plot.** Ctrl+Shift+G draws the numbers a pane prints as a graph
+above it: each line is a sample, its fields split by `,` `|` `;` or any
+separator but space are the channels. Rate, names from a header line,
+per-channel show/hide, hover readout, pause and CSV export.
+
+![Live plot of four channels from an ADC board above its serial output](docs/images/plot.png)
+
 **USB capture.** Listens to USB traffic without touching it (kernel
 usbmon) and decodes it: descriptors, CDC line coding (`115200 8N1`), the
 data of USB serial adapters as text, HID keys, mass storage commands,
@@ -65,6 +72,7 @@ Automation
 - Multi-exec to several panes
 
 Debugging
+- Live multichannel plot of separated values in any pane
 - Timestamps, regex highlight rules and logging to file in every pane
 - Passive USB capture with decoders and pcap export
 - Logcat view with level, tag, process and text filters
@@ -149,6 +157,7 @@ GTK's GPU renderer.
 | Toggle bottom panel | Ctrl+Shift+J |
 | Multi-exec | Ctrl+Shift+M |
 | Command palette | Ctrl+Shift+P |
+| Plot values | Ctrl+Shift+G |
 | Preferences | Ctrl+, |
 | Next / previous tab | Ctrl+PgDn / Ctrl+PgUp |
 | Go to tab N | Alt+1..9 |
@@ -166,6 +175,7 @@ Android devices: [docs/adb.md](docs/adb.md).
 Multi-exec, macros, tunnels: [docs/multiexec.md](docs/multiexec.md), [docs/macros.md](docs/macros.md), [docs/tunnels.md](docs/tunnels.md).
 USB capture: [docs/usb.md](docs/usb.md).
 TFTP, HTTP, scanner, ping, Wake-on-LAN: [docs/tools.md](docs/tools.md).
+Live plot: [docs/plot.md](docs/plot.md).
 Preferences, shortcuts, command palette: [docs/settings.md](docs/settings.md). Themes and the theme editor: [docs/themes.md](docs/themes.md).
 Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termvisor --release-all`.
 

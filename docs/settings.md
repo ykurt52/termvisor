@@ -42,6 +42,7 @@ command palette and in `src/keybindings.rs`.
 | Quick Connect | Ctrl+Shift+L |
 | Find Session | Ctrl+Shift+K |
 | Command Palette | Ctrl+Shift+P |
+| Plot Values | Ctrl+Shift+G |
 | Toggle Sidebar / Bottom Panel | Ctrl+Shift+B / Ctrl+Shift+J |
 | Multi-Exec | Ctrl+Shift+M |
 | Preferences | Ctrl+, |
