@@ -101,10 +101,18 @@ jobs:
       # Folder with the exe and the GTK runtime, zipped.
       - name: Bundle
         run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
-          cd dist && zip -qr termvisor-windows-x64.zip termvisor
+          cd dist && zip -qr "termvisor-windows-x64_v${version}.zip" termvisor
+
+      - name: Installer
+        shell: pwsh
+        run: packaging/windows/setup.ps1 $env:VERSION dist/termvisor dist
 
       - uses: actions/upload-artifact@v7
         with:
-          name: termvisor-windows
-          path: dist/termvisor-windows-x64.zip
+          name: termvisor-windows-x64_v${{ env.VERSION }}
+          path: |
+            dist/termvisor-windows-x64_v*.zip
+            dist/termvisor-windows-x64_v*_setup.exe

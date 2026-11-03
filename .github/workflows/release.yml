@@ -68,13 +68,17 @@ jobs:
         run: |
           cargo build --release --locked
           packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
-          cd dist && zip -qr "termvisor-${GITHUB_REF_NAME}-windows-x64.zip" termvisor
+          cd dist && zip -qr "termvisor-windows-x64_${GITHUB_REF_NAME}.zip" termvisor
+
+      - name: Installer
+        shell: pwsh
+        run: packaging/windows/setup.ps1 ($env:GITHUB_REF_NAME.TrimStart('v')) dist/termvisor dist
 
       - name: Attach to the release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item dist/termvisor-*-windows-x64.zip)
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item dist/termvisor-windows-x64_v*.zip, dist/termvisor-windows-x64_v*_setup.exe)
 
   apt:
     needs: deb

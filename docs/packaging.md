@@ -4,7 +4,7 @@
 |---|---|---|
 | Debian, Ubuntu 24.04+ | `.deb` built with cargo-deb | `[package.metadata.deb]` in `Cargo.toml` |
 | Arch Linux (AUR) | PKGBUILD from the release tarball | `packaging/arch/` |
-| Windows 10/11 x64 | zip with the exe and the GTK runtime, built with MSYS2 | `packaging/windows/` |
+| Windows 10/11 x64 | installer (Inno Setup) and zip with the exe and the GTK runtime, built with MSYS2 | `packaging/windows/` |
 | Desktop menu, software centers | Desktop file, AppStream metainfo, icon | `data/` |
 | Checks | GitHub Actions on every push and PR | `.github/workflows/ci.yml` |
 | Releases | GitHub Actions on a `v*` tag | `.github/workflows/release.yml` |
@@ -115,9 +115,41 @@ packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
 | `share/glib-2.0/schemas/` | compiled GSettings schemas |
 
 GTK finds `share/` and `lib/` next to the exe. Users unzip the folder
-anywhere and run `termvisor.exe`; nothing is installed. CI uploads the zip
-as the `termvisor-windows` artifact on every push; a `v*` tag attaches
-`termvisor-<tag>-windows-x64.zip` to the release.
+anywhere and run `termvisor.exe`; nothing is installed.
+
+### Installer
+
+`setup.ps1 <version> <bundle-dir> <out-dir>` runs Inno Setup on
+`termvisor.iss` and writes `termvisor-windows-x64_v<version>_setup.exe`:
+
+```powershell
+packaging/windows/setup.ps1 1.0.1 dist/termvisor dist
+```
+
+| Behaviour | How |
+|---|---|
+| Install for the user, no admin rights | default; the first page offers "all users" (needs admin) |
+| Start menu entry, optional desktop icon | `[Icons]`, `[Tasks]` |
+| Uninstall from Settings → Apps | Inno's uninstaller |
+| Same or older version installed | installs over it; old DLLs, `lib/` and `share/` are removed first |
+| Newer version installed | stops with a message |
+
+The installed copy is found by the fixed `AppGuid` in `termvisor.iss`;
+never change it. The Windows runner image has Inno Setup.
+
+`termvisor.ico` is made from the app SVG:
+`packaging/windows/mkico.py data/icons/hicolor/scalable/apps/io.github.ykurt52.termvisor.svg packaging/windows/termvisor.ico`
+(needs Python with GdkPixbuf). Run it again when the SVG changes.
+
+### File names
+
+| File | Content |
+|---|---|
+| `termvisor-windows-x64_v<version>.zip` | the bundle folder |
+| `termvisor-windows-x64_v<version>_setup.exe` | the installer |
+
+CI uploads both as the `termvisor-windows-x64_v<version>` artifact on
+every push; a `v*` tag attaches both to the release.
 
 The Windows code paths are type-checked on Linux too, see
 [windows.md](windows.md).
@@ -144,7 +176,7 @@ on pull requests and by hand. It has three jobs:
 |---|---|
 | Ubuntu 24.04, Rust 1.92 | clippy with warnings as errors, tests under a virtual display (so the GTK test runs), desktop and metainfo validation, release build, `.deb` as an artifact |
 | Arch Linux | build and tests in an `archlinux:latest` container with the distribution's Rust |
-| Windows (MSYS2 UCRT64) | release build, bundle, zip as an artifact |
+| Windows (MSYS2 UCRT64) | release build, bundle, zip and installer as an artifact |
 
 ## Releasing
 
@@ -154,6 +186,6 @@ on pull requests and by hand. It has three jobs:
 2. Commit, then tag and push: `git tag v1.0.1 && git push origin refs/tags/v1.0.1`
    (full ref, since the `v1.0.1` branch has the same name).
 3. `release.yml` checks that the tag matches `Cargo.toml`, builds the
-   `.deb` and creates the GitHub release with it, adds the Windows zip,
+   `.deb` and creates the GitHub release with it, adds the Windows zip and installer,
    then `apt.yml` publishes the APT repository.
 4. Update the AUR package (above).
