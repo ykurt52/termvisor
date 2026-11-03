@@ -18,7 +18,7 @@ pkgbase = termvisor
 	optdepends = mosh: mosh sessions
 	optdepends = android-tools: Android shell, logcat and files
 	optdepends = iputils: ping and tracepath tools
-	source = termvisor-1.0.1.tar.gz::https://github.com/ykurt52/termvisor/archive/v1.0.1.tar.gz
-	sha256sums = SKIP
+	source = termvisor-1.0.1.tar.gz::https://github.com/ykurt52/termvisor/archive/refs/tags/v1.0.1.tar.gz
+	sha256sums = 4153c4fce2634e3a68f19bd7924d915a617a14ff0c476f939ffe8217c493856a
 
 pkgname = termvisor

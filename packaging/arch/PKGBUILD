@@ -11,8 +11,8 @@ makedepends=('cargo')
 optdepends=('mosh: mosh sessions'
             'android-tools: Android shell, logcat and files'
             'iputils: ping and tracepath tools')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('4153c4fce2634e3a68f19bd7924d915a617a14ff0c476f939ffe8217c493856a')
 
 prepare() {
   cd "$pkgname-$pkgver"

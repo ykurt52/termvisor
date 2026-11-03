@@ -126,7 +126,7 @@ The Windows code paths are type-checked on Linux too, see
 
 ```bash
 cd packaging/arch
-updpkgsums          # after the release tag exists: real checksum instead of SKIP
+updpkgsums          # after the release tag exists: checksum of the new tarball
 makepkg --printsrcinfo > .SRCINFO
 makepkg -si         # build and install locally to try it
 ```
