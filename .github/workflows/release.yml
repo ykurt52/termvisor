@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag like v0.1.0 builds the .deb and attaches it to a GitHub
-# release with that name (the source tarball is added by GitHub).
+# Pushing a tag like v0.1.0 builds the .deb and the Windows zip and
+# attaches them to a GitHub release with that name (the source tarball is
+# added by GitHub).
 on:
   push:
     tags: ["v*"]
@@ -42,6 +43,38 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" target/debian/*.deb --title "$GITHUB_REF_NAME" --generate-notes
+
+  windows:
+    needs: deb
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2.33.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            zip
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-rust
+
+      - name: Build and bundle
+        shell: msys2 {0}
+        run: |
+          cargo build --release --locked
+          packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
+          cd dist && zip -qr "termvisor-${GITHUB_REF_NAME}-windows-x64.zip" termvisor
+
+      - name: Attach to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item dist/termvisor-*-windows-x64.zip)
 
   apt:
     needs: deb

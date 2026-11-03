@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "v[0-9]*"]
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -69,3 +70,41 @@ jobs:
         run: |
           cargo build --locked
           cargo test --locked
+
+  windows:
+    name: Windows (MSYS2 UCRT64)
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2.33.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            zip
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-rust
+
+      - name: Build
+        run: |
+          rustc --version
+          cargo build --release --locked
+
+      # Folder with the exe and the GTK runtime, zipped.
+      - name: Bundle
+        run: |
+          packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
+          cd dist && zip -qr termvisor-windows-x64.zip termvisor
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: termvisor-windows
+          path: dist/termvisor-windows-x64.zip
