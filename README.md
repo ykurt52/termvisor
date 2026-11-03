@@ -90,8 +90,15 @@ Specification and milestones: [docs/SPEC.md](docs/SPEC.md).
 
 ## Install
 
-- Debian/Ubuntu 24.04+: the `.deb` from the releases page,
-  `sudo apt install ./termvisor_*.deb`.
+- Ubuntu 24.04+ (amd64), from the APT repository:
+
+  ```sh
+  curl -fsSL https://ykurt52.github.io/termvisor/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/termvisor.gpg
+  echo "deb [signed-by=/usr/share/keyrings/termvisor.gpg] https://ykurt52.github.io/termvisor stable main" | sudo tee /etc/apt/sources.list.d/termvisor.list
+  sudo apt update && sudo apt install termvisor
+  ```
+
+- Or the `.deb` from the releases page: `sudo apt install ./termvisor_*.deb`.
 - Arch: the `termvisor` AUR package.
 
 Packaging details: [docs/packaging.md](docs/packaging.md).

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>termvisor apt repository</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1d1d1f; --code: #f2f2f4; --link: #2563eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #18181b; --fg: #e4e4e7; --code: #27272a; --link: #60a5fa; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  pre { background: var(--code); padding: 12px; border-radius: 6px; overflow-x: auto; }
+  a { color: var(--link); }
+</style>
+</head>
+<body>
+<h1>termvisor apt repository</h1>
+<p>Add the repository once (Ubuntu 24.04 and newer, amd64):</p>
+<pre>curl -fsSL https://ykurt52.github.io/termvisor/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/termvisor.gpg
+echo "deb [signed-by=/usr/share/keyrings/termvisor.gpg] https://ykurt52.github.io/termvisor stable main" | sudo tee /etc/apt/sources.list.d/termvisor.list
+sudo apt update
+sudo apt install termvisor</pre>
+<p>Updates then come with <code>sudo apt upgrade</code>.</p>
+<p>Source and issues: <a href="https://github.com/ykurt52/termvisor">github.com/ykurt52/termvisor</a></p>
+</body>
+</html>

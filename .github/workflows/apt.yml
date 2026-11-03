@@ -1,0 +1,60 @@
+name: APT repository
+
+# Rebuilds the signed apt repository from the .deb files of every GitHub
+# release and publishes it on GitHub Pages. Runs after each release, or
+# by hand from the Actions tab.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils gnupg
+
+      - name: Packages of all releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir debs
+          for t in $(gh release list --limit 1000 --json tagName -q '.[].tagName'); do
+            gh release download "$t" -p '*.deb' -D debs --skip-existing
+          done
+          ls -l debs
+
+      - name: Signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          test -n "$APT_SIGNING_KEY" || { echo "secret APT_SIGNING_KEY is not set"; exit 1; }
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+
+      - name: Build repository
+        env:
+          APT_KEY_PASS: ${{ secrets.APT_SIGNING_PASS }}
+        run: packaging/apt/build-repo.sh debs site
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5
