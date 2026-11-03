@@ -11,7 +11,7 @@ use crate::macros::{self, Macro, Step};
 use crate::multi;
 use crate::state::State;
 
-type Target = Box<dyn Fn() -> Option<vte::Terminal>>;
+type Target = Box<dyn Fn() -> Option<crate::vt::View>>;
 
 pub struct Page {
     pub widget: gtk::Box,
@@ -122,7 +122,7 @@ pub fn build(state: &Rc<State>) -> Rc<Page> {
 
 impl Page {
     /// Sets how the pane a macro runs on is found (normally the focused one).
-    pub fn set_target(&self, f: impl Fn() -> Option<vte::Terminal> + 'static) {
+    pub fn set_target(&self, f: impl Fn() -> Option<crate::vt::View> + 'static) {
         self.target.replace(Some(Box::new(f)));
     }
 
@@ -239,7 +239,7 @@ impl Page {
         self.run_on(i, panes);
     }
 
-    fn run_on(self: &Rc<Self>, i: usize, panes: Vec<vte::Terminal>) {
+    fn run_on(self: &Rc<Self>, i: usize, panes: Vec<crate::vt::View>) {
         let Some(m) = self.macros.borrow().get(i).cloned() else { return };
         for t in panes {
             if let Some(l) = self.state.launch(&t) {

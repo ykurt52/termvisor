@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -133,7 +132,7 @@ struct Mark {
 }
 
 /// Pipelines by terminal.
-type Outs = Vec<(glib::WeakRef<vte::Terminal>, Rc<RefCell<Out>>)>;
+type Outs = Vec<(glib::WeakRef<crate::vt::View>, Rc<RefCell<Out>>)>;
 
 thread_local! {
     static MARKS: RefCell<Rc<Vec<Mark>>> = RefCell::new(Rc::new(Vec::new()));
@@ -460,7 +459,7 @@ impl Log {
             .map(|s| s.to_string())
             .unwrap_or_default();
         let path = dir.join(format!("{}-{when}.log", file_name(title)));
-        let f = OpenOptions::new().create(true).append(true).mode(0o600).open(&path)?;
+        let f = crate::sys::private(&mut OpenOptions::new()).create(true).append(true).open(&path)?;
         Ok(Self { w: BufWriter::new(f), path, plain, strip: Strip::default(), at_start: true })
     }
 
@@ -562,7 +561,7 @@ impl Out {
 }
 
 /// Creates the pipeline of terminal `t` with the defaults from settings.
-pub fn attach(t: &vte::Terminal, title: &str, cfg: &settings::Settings) -> Rc<RefCell<Out>> {
+pub fn attach(t: &crate::vt::View, title: &str, cfg: &settings::Settings) -> Rc<RefCell<Out>> {
     let mut out = Out {
         title: title.to_string(),
         filter: Filter::new(cfg.timestamps, cfg.highlight),
@@ -584,7 +583,7 @@ pub fn attach(t: &vte::Terminal, title: &str, cfg: &settings::Settings) -> Rc<Re
 }
 
 /// Pipeline of terminal `t`, if it has one.
-pub fn of(t: &vte::Terminal) -> Option<Rc<RefCell<Out>>> {
+pub fn of(t: &crate::vt::View) -> Option<Rc<RefCell<Out>>> {
     OUTS.with(|v| v.borrow().iter().find(|(w, _)| w.upgrade().as_ref() == Some(t)).map(|(_, o)| o.clone()))
 }
 

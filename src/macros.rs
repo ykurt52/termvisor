@@ -175,7 +175,7 @@ pub fn steps_from(keys: &[(Duration, String)]) -> Vec<Step> {
 }
 
 struct Rec {
-    term: glib::WeakRef<vte::Terminal>,
+    term: glib::WeakRef<crate::vt::View>,
     start: Instant,
     keys: Vec<(Duration, String)>,
 }
@@ -184,12 +184,12 @@ thread_local! {
     static REC: RefCell<Option<Rec>> = const { RefCell::new(None) };
 }
 
-pub fn recording() -> Option<vte::Terminal> {
+pub fn recording() -> Option<crate::vt::View> {
     REC.with(|r| r.borrow().as_ref().and_then(|r| r.term.upgrade()))
 }
 
 /// Starts recording what is typed in `t`.
-pub fn record(t: &vte::Terminal) {
+pub fn record(t: &crate::vt::View) {
     REC.with(|r| r.replace(Some(Rec { term: t.downgrade(), start: Instant::now(), keys: Vec::new() })));
 }
 
@@ -199,7 +199,7 @@ pub fn stop_recording() -> Vec<Step> {
 }
 
 /// Input typed in `t` (terminal replies already left out).
-pub fn recorded(t: &vte::Terminal, text: &str) {
+pub fn recorded(t: &crate::vt::View, text: &str) {
     REC.with(|r| {
         if let Some(rec) = r.borrow_mut().as_mut() {
             if rec.term.upgrade().as_ref() == Some(t) {
@@ -222,7 +222,7 @@ async fn pause(ms: u64, stop: &Cell<bool>) -> Result<(), String> {
 }
 
 /// Runs `m` on `t` until done, failed or `stop` is set.
-pub async fn run(t: &vte::Terminal, m: &Macro, stop: Rc<Cell<bool>>) -> Result<(), String> {
+pub async fn run(t: &crate::vt::View, m: &Macro, stop: Rc<Cell<bool>>) -> Result<(), String> {
     m.check()?;
     let out = output::of(t).ok_or("this pane has no output to watch")?;
     let tap = Rc::new(RefCell::new(String::new()));

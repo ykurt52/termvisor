@@ -6,9 +6,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::{glib, prelude::*};
-use vte::prelude::*;
 
-use crate::{logcat, multi, output, plot, streampane, toolpane, usbpane};
+use crate::{logcat, multi, output, plot, streampane, toolpane};
 use crate::state::State;
 use crate::term::{self, Kind, Launch};
 
@@ -72,8 +71,8 @@ pub fn page_of(w: &gtk::Widget) -> Option<(adw::TabView, adw::TabPage)> {
 }
 
 /// First terminal found under `w`.
-pub fn find(w: &gtk::Widget) -> Option<vte::Terminal> {
-    if let Some(t) = w.downcast_ref::<vte::Terminal>() {
+pub fn find(w: &gtk::Widget) -> Option<crate::vt::View> {
+    if let Some(t) = w.downcast_ref::<crate::vt::View>() {
         return Some(t.clone());
     }
     let mut child = w.first_child();
@@ -91,15 +90,14 @@ This can be a reinstalled server or an attack. Verify the new fingerprint out of
 then remove the old key with: ssh-keygen -R <host>\x1b[0m\r\n";
 
 /// True when ssh reported a changed host key on screen.
-fn host_key_changed(t: &vte::Terminal) -> bool {
-    t.text_format(vte::Format::Text)
-        .is_some_and(|s| s.contains("REMOTE HOST IDENTIFICATION HAS CHANGED"))
+fn host_key_changed(t: &crate::vt::View) -> bool {
+    t.text().contains("REMOTE HOST IDENTIFICATION HAS CHANGED")
 }
 
 const LEAF_CLASS: &str = "leaf";
 
 /// Pane widget that holds `term` (its direct child of a Paned or root).
-fn leaf_of(term: &vte::Terminal) -> Option<gtk::Widget> {
+fn leaf_of(term: &crate::vt::View) -> Option<gtk::Widget> {
     let mut cur = term.parent();
     while let Some(w) = cur {
         if w.has_css_class(LEAF_CLASS) {
@@ -112,11 +110,12 @@ fn leaf_of(term: &vte::Terminal) -> Option<gtk::Widget> {
 
 /// Creates a pane for `launch`. Returns the terminal and the leaf widget
 /// to insert into the layout.
-pub fn open(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) {
+pub fn open(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget) {
     let (t, leaf) = match &launch.stream {
         Some(s) => streampane::build(state, launch, s.clone()),
         None if launch.kind == Kind::Logcat => logcat::build(state, launch),
-        None if launch.kind == Kind::Usb => usbpane::build(state, launch),
+        #[cfg(target_os = "linux")]
+        None if launch.kind == Kind::Usb => crate::usbpane::build(state, launch),
         None if launch.kind == Kind::Tool => toolpane::build(state, launch),
         None => {
             let t = hooked(state, launch);
@@ -135,7 +134,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) 
 ///
 /// A local shell closes its pane on exit. Other sessions stay open and
 /// restart on Enter.
-fn hooked(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
+fn hooked(state: &Rc<State>, launch: &Launch) -> crate::vt::View {
     let t = term::spawn(state, launch);
     t.connect_window_title_changed(|t| {
         let Some(title) = t.window_title() else {
@@ -178,13 +177,13 @@ fn hooked(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
 
 thread_local! {
     /// Plots shown above panes.
-    static PLOTS: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Rc<plot::Plot>)>> = const { RefCell::new(Vec::new()) };
+    static PLOTS: RefCell<Vec<(glib::WeakRef<crate::vt::View>, Rc<plot::Plot>)>> = const { RefCell::new(Vec::new()) };
 }
 
 const PLOT_SPLIT: &str = "plot-split";
 
 /// Shows or hides a live plot of the numbers `term` prints, above it.
-pub fn toggle_plot(term: &vte::Terminal) {
+pub fn toggle_plot(term: &crate::vt::View) {
     let Some(overlay) = leaf_of(term).and_downcast::<gtk::Overlay>() else { return };
     let Some(child) = overlay.child() else { return };
     if let Some(split) = child.downcast_ref::<gtk::Paned>().filter(|p| p.has_css_class(PLOT_SPLIT)) {
@@ -214,7 +213,7 @@ pub fn toggle_plot(term: &vte::Terminal) {
 }
 
 /// Splits the pane of `term`, new terminal goes right or below.
-pub fn split(state: &Rc<State>, term: &vte::Terminal, dir: gtk::Orientation) -> Option<vte::Terminal> {
+pub fn split(state: &Rc<State>, term: &crate::vt::View, dir: gtk::Orientation) -> Option<crate::vt::View> {
     let leaf = leaf_of(term)?;
     let size = match dir {
         gtk::Orientation::Horizontal => leaf.width(),
@@ -238,7 +237,7 @@ pub fn split(state: &Rc<State>, term: &vte::Terminal, dir: gtk::Orientation) -> 
 }
 
 /// Closes the pane of `term`; closes the tab when it was the last pane.
-pub fn close(term: &vte::Terminal) {
+pub fn close(term: &crate::vt::View) {
     let Some(leaf) = leaf_of(term) else {
         return;
     };

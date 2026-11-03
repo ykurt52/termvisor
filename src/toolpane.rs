@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use vte::prelude::*;
 
 use crate::nettools::{self, Ping, Scan, ServerPrefs, Stats, Trace};
 use crate::output::Out;
@@ -28,7 +27,7 @@ const SAMPLES: usize = 120;
 /// Writes log lines to the tab's terminal (and its log file).
 #[derive(Clone)]
 struct Feed {
-    term: glib::WeakRef<vte::Terminal>,
+    term: glib::WeakRef<crate::vt::View>,
     out: Rc<RefCell<Out>>,
 }
 
@@ -93,7 +92,7 @@ fn reset(b: &gtk::ToggleButton, busy: &Cell<bool>) {
     busy.set(false);
 }
 
-pub fn build(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) {
+pub fn build(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget) {
     let t = term::spawn(state, launch);
     let out = crate::output::of(&t).unwrap_or_else(|| crate::output::attach(&t, &launch.title, &state.cfg.borrow()));
     let feed = Feed { term: t.downgrade(), out };

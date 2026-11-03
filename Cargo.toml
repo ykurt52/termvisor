@@ -13,11 +13,9 @@ repository = "https://github.com/ykurt52/termvisor"
 [dependencies]
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
-vte = { package = "vte4", version = "0.10", features = ["v0_76"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
-libsecret = "0.9"
 serialport = "4.10"
 async-channel = "2"
 libc = "0.2"
@@ -26,6 +24,23 @@ mavlink = { version = "0.21", default-features = false, features = ["std", "dial
 suppaftp = { version = "12", features = ["native-tls"] }
 zmodem2 = "0.7"
 alacritty_terminal = "0.26"
+
+[target.'cfg(unix)'.dependencies]
+libsecret = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
 
 [build-dependencies]
 glib-build-tools = "0.22"

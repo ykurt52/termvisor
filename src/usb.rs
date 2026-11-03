@@ -212,7 +212,7 @@ impl<W: Write> PcapWriter<W> {
 }
 
 pub fn save_pcap(path: &Path, events: &[Event]) -> io::Result<()> {
-    let f = OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(path)?;
+    let f = crate::sys::private(&mut OpenOptions::new()).create(true).truncate(true).write(true).open(path)?;
     let mut w = PcapWriter::new(BufWriter::new(f))?;
     for e in events {
         w.write(e)?;

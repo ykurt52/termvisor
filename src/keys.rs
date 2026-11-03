@@ -73,13 +73,13 @@ pub fn row(init: Option<&str>, dlg: &adw::Dialog, toasts: &adw::ToastOverlay) ->
 
 /// Runs `f` for the shortcut only while a terminal of the window has the
 /// focus; elsewhere (dialogs, entries) the key keeps its normal meaning.
-pub fn in_terminal(f: impl Fn(&vte::Terminal) + 'static) -> gtk::CallbackAction {
+pub fn in_terminal(f: impl Fn(&crate::vt::View) + 'static) -> gtk::CallbackAction {
     gtk::CallbackAction::new(move |w, _| {
         let t = w
             .downcast_ref::<gtk::Window>()
             .and_then(gtk::prelude::GtkWindowExt::focus)
-            .and_then(|f| f.ancestor(vte::Terminal::static_type()))
-            .and_then(|t| t.downcast::<vte::Terminal>().ok());
+            .and_then(|f| f.ancestor(crate::vt::View::static_type()))
+            .and_then(|t| t.downcast::<crate::vt::View>().ok());
         match t {
             Some(t) => {
                 f(&t);

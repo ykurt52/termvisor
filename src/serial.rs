@@ -73,8 +73,9 @@ impl SerialCfg {
     }
 
     pub fn check(&self) -> Result<(), String> {
-        if !self.device.starts_with("/dev/") {
-            return Err(format!("device must be under /dev, got '{}'", self.device));
+        if !is_device(&self.device) {
+            let want = if cfg!(windows) { "a COM port" } else { "under /dev" };
+            return Err(format!("device must be {want}, got '{}'", self.device));
         }
         if self.baud == 0 {
             return Err("baud rate must be above 0".into());
@@ -88,6 +89,28 @@ impl SerialCfg {
         Ok(())
     }
 }
+
+/// True for a serial device name: /dev/... on Unix, COM<n> on Windows.
+pub fn is_device(name: &str) -> bool {
+    if cfg!(windows) {
+        is_com(name)
+    } else {
+        name.starts_with("/dev/")
+    }
+}
+
+/// COM3, com12, \\.\COM15.
+fn is_com(name: &str) -> bool {
+    let u = name.to_ascii_uppercase();
+    let u = u.strip_prefix(r"\\.\").unwrap_or(&u);
+    u.strip_prefix("COM").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The platform's native port type.
+#[cfg(unix)]
+type Port = serialport::TTYPort;
+#[cfg(windows)]
+type Port = serialport::COMPort;
 
 pub struct PortInfo {
     pub path: String,
@@ -339,7 +362,7 @@ pub fn open(cfg: &SerialCfg) -> Result<(Conn, async_channel::Receiver<Event>), S
     Ok((Conn { cmds: cmd_tx, stop, lock }, ev_rx))
 }
 
-fn read_loop(mut port: serialport::TTYPort, tx: async_channel::Sender<Event>, stop: Arc<AtomicBool>) {
+fn read_loop(mut port: Port, tx: async_channel::Sender<Event>, stop: Arc<AtomicBool>) {
     let mut buf = [0u8; 4096];
     while !stop.load(Ordering::Relaxed) {
         match port.read(&mut buf) {
@@ -362,7 +385,7 @@ fn read_loop(mut port: serialport::TTYPort, tx: async_channel::Sender<Event>, st
 }
 
 fn write_loop(
-    mut port: serialport::TTYPort,
+    mut port: Port,
     cmds: mpsc::Receiver<Cmd>,
     tx: async_channel::Sender<Event>,
     stop: Arc<AtomicBool>,
@@ -406,6 +429,16 @@ mod tests {
         c.data_bits = 8;
         c.device = "ttyUSB0".into();
         assert!(c.check().is_err());
+    }
+
+    #[test]
+    fn com_names() {
+        for ok in ["COM3", "com12", r"\\.\COM15"] {
+            assert!(is_com(ok), "{ok}");
+        }
+        for bad in ["COM", "COMX", "/dev/ttyS0", "COM3@115200"] {
+            assert!(!is_com(bad), "{bad}");
+        }
     }
 
     #[test]

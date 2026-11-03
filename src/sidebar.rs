@@ -10,7 +10,6 @@ use crate::devices;
 use crate::macropage;
 use crate::tunnelpage;
 use crate::toolspage;
-use crate::usbpage;
 use crate::editor::{self, Mode};
 use crate::files::Files;
 use crate::sessions::{self, Node, NodeKind};
@@ -59,7 +58,11 @@ impl Sidebar {
             let page = match note {
                 None if id == "files" => files.widget.clone().upcast::<gtk::Widget>(),
                 None if id == "android" => devices::page(open.clone()).upcast::<gtk::Widget>(),
-                None if id == "usb" => usbpage::page(open.clone()).upcast::<gtk::Widget>(),
+                #[cfg(target_os = "linux")]
+                None if id == "usb" => crate::usbpage::page(open.clone()).upcast::<gtk::Widget>(),
+                // USB capture needs usbmon.
+                #[cfg(not(target_os = "linux"))]
+                None if id == "usb" => continue,
                 None if id == "tools" => toolspage::page(open.clone()).upcast::<gtk::Widget>(),
                 None if id == "macros" => macros.widget.clone().upcast::<gtk::Widget>(),
                 None if id == "tunnels" => tunnelpage::page(state).upcast::<gtk::Widget>(),

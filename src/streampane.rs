@@ -15,7 +15,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use gtk::{gdk, gio, glib, prelude::*};
-use vte::prelude::*;
 
 use crate::link::{self, Eol, Event, Hex, View};
 use crate::files::downloads_dir;
@@ -78,7 +77,7 @@ fn open_link(src: &Stream) -> Result<(Link, async_channel::Receiver<Event>), Str
 }
 
 struct Pane {
-    term: glib::WeakRef<vte::Terminal>,
+    term: glib::WeakRef<crate::vt::View>,
     src: Stream,
     link: RefCell<Option<Link>>,
     hex: RefCell<Hex>,
@@ -115,7 +114,7 @@ struct Port {
 thread_local! {
     static PORTS: RefCell<HashMap<String, Port>> = RefCell::new(HashMap::new());
     /// Stream panes by terminal, so other parts can write to their link.
-    static PANES: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Weak<Pane>)>> = const { RefCell::new(Vec::new()) };
+    static PANES: RefCell<Vec<(glib::WeakRef<crate::vt::View>, Weak<Pane>)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Local echo text for bytes sent from a button or the send bar.
@@ -128,13 +127,13 @@ fn shown(bytes: &[u8], hex: bool) -> String {
     }
 }
 
-fn pane_of(t: &vte::Terminal) -> Option<Rc<Pane>> {
+fn pane_of(t: &crate::vt::View) -> Option<Rc<Pane>> {
     PANES.with(|v| v.borrow().iter().find(|(w, _)| w.upgrade().as_ref() == Some(t)).and_then(|(_, p)| p.upgrade()))
 }
 
 /// Sends `text` to the stream pane that shows `t` as if typed there.
 /// Returns false when `t` is not a stream pane.
-pub fn type_text(t: &vte::Terminal, text: &str) -> bool {
+pub fn type_text(t: &crate::vt::View, text: &str) -> bool {
     match pane_of(t) {
         Some(p) => {
             p.typed(text);
@@ -146,7 +145,7 @@ pub fn type_text(t: &vte::Terminal, text: &str) -> bool {
 
 /// Writes raw bytes to the link of the stream pane that shows `t`.
 /// Returns false when `t` is not a stream pane.
-pub fn write(t: &vte::Terminal, bytes: &[u8], hex: bool) -> bool {
+pub fn write(t: &crate::vt::View, bytes: &[u8], hex: bool) -> bool {
     let Some(p) = pane_of(t) else { return false };
     if p.xfer.borrow().is_some() {
         p.note("33", "file transfer running; sending is paused");
@@ -752,7 +751,7 @@ fn send_bar(p: &Rc<Pane>) -> gtk::Box {
 }
 
 /// Builds the pane. Returns the terminal and the leaf widget.
-pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (vte::Terminal, gtk::Widget) {
+pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::View, gtk::Widget) {
     let t = term::spawn(state, launch);
     let serial = matches!(src, Stream::Serial(_));
     let mirror = device(&src)

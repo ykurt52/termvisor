@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev libudev-dev pkg-config dpkg-dev
+            libgtk-4-dev libadwaita-1-dev libsecret-1-dev libudev-dev pkg-config dpkg-dev
 
       - name: Rust toolchain
         run: |

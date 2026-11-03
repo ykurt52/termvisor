@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use vte::prelude::*;
 
 use crate::output::Out;
 use crate::state::State;
@@ -39,7 +38,7 @@ impl ViewMode {
 }
 
 struct Pane {
-    term: glib::WeakRef<vte::Terminal>,
+    term: glib::WeakRef<crate::vt::View>,
     out: Rc<RefCell<Out>>,
     launch: UsbLaunch,
     events: RefCell<VecDeque<Event>>,
@@ -297,7 +296,7 @@ fn button(icon: &str, tip: &str) -> gtk::Button {
     b
 }
 
-pub fn build(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) {
+pub fn build(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget) {
     let t = term::spawn(state, launch);
     let out = crate::output::of(&t).unwrap_or_else(|| crate::output::attach(&t, &launch.title, &state.cfg.borrow()));
     let u = launch.usb.clone().unwrap_or_default();

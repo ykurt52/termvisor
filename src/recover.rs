@@ -5,10 +5,11 @@
 // SSH connections, and other termvisor processes that hang while holding ports.
 
 use std::fs;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::Duration;
 
 use crate::askpass;
@@ -107,6 +108,7 @@ pub fn instances() -> Vec<Instance> {
 }
 
 /// SIGTERM, then SIGKILL after 2 s. True when the process is gone.
+#[cfg(unix)]
 pub fn stop(pid: u32) -> bool {
     let Ok(id) = i32::try_from(pid) else { return false };
     // SAFETY: kill(2) with a plain pid and signal has no memory effects.
@@ -129,6 +131,12 @@ pub fn stop(pid: u32) -> bool {
         }
         thread::sleep(Duration::from_millis(100));
     }
+    false
+}
+
+/// Other instances are not looked up on Windows (no /proc).
+#[cfg(not(unix))]
+pub fn stop(_pid: u32) -> bool {
     false
 }
 
@@ -160,7 +168,21 @@ fn sockets() -> (Vec<PathBuf>, Vec<PathBuf>) {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("cm-")))
-        .partition(|p| UnixStream::connect(p).is_ok())
+        .partition(|p| live(p))
+}
+
+/// True when an ssh master answers on `sock`.
+fn live(sock: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::net::UnixStream::connect(sock).is_ok()
+    }
+    // No connection sharing without Unix sockets.
+    #[cfg(not(unix))]
+    {
+        let _ = sock;
+        false
+    }
 }
 
 /// Asks the ssh master behind `sock` to exit.

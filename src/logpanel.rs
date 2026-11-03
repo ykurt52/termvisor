@@ -10,7 +10,7 @@ use gtk::{gio, glib};
 use crate::output::{self, LogMode, Rule, COLORS};
 use crate::state::State;
 
-type Target = Box<dyn Fn() -> Option<vte::Terminal>>;
+type Target = Box<dyn Fn() -> Option<crate::vt::View>>;
 
 pub struct Panel {
     pub widget: gtk::Box,
@@ -24,7 +24,7 @@ pub struct Panel {
     list: gtk::ListBox,
     rules: RefCell<Vec<Rule>>,
     target: RefCell<Option<Target>>,
-    shown: RefCell<glib::WeakRef<vte::Terminal>>,
+    shown: RefCell<glib::WeakRef<crate::vt::View>>,
     /// Set while controls are filled from a pane, so their signals are ignored.
     syncing: Cell<bool>,
 }
@@ -192,7 +192,7 @@ pub fn build(state: &Rc<State>) -> Rc<Panel> {
 
 impl Panel {
     /// Sets how the shown pane is found (normally the focused one).
-    pub fn set_target(&self, f: impl Fn() -> Option<vte::Terminal> + 'static) {
+    pub fn set_target(&self, f: impl Fn() -> Option<crate::vt::View> + 'static) {
         self.target.replace(Some(Box::new(f)));
     }
 

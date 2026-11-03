@@ -16,20 +16,20 @@ Working name. Final name pending a trademark check.
 |---|---|---|
 | Language | Rust (stable) | No GC, memory safe, C-level speed |
 | GUI | GTK4 + libadwaita | Native on Debian and Arch, CSS theming |
-| Terminal | VTE (gtk4) | Mature emulator, truecolor, hyperlinks |
+| Terminal | Own GTK view on `alacritty_terminal` (`src/vt.rs`) | Truecolor, runs on Linux and Windows |
 | SSH | System OpenSSH + ControlMaster | Reuses `~/.ssh/config`, agent, ProxyJump, FIDO |
 | SFTP | SFTP subsystem over the master socket | No second login |
-| Serial | `serialport` crate | Fed into VTE via `feed()` |
+| Serial | `serialport` crate | Fed into the terminal view via `feed()` |
 | FTP/FTPS | `suppaftp` | TLS support |
 
-Minimum runtime: GTK 4.14, libadwaita 1.5, VTE 0.76 (Ubuntu 24.04 / Mint 22 baseline).
+Minimum runtime: GTK 4.14, libadwaita 1.5 (Ubuntu 24.04 / Mint 22 baseline).
 Code must not use APIs newer than these.
 
 ## 2. Connection types
 
 | Type | Implementation | Version |
 |---|---|---|
-| Local shell | VTE + pty | v1 |
+| Local shell | Terminal view + pty | v1 |
 | SSH | OpenSSH + ControlMaster | v1 |
 | Serial | `serialport` | v1 |
 | Telnet | Built-in client | v1 |

@@ -1,9 +1,14 @@
 // termvisor entry point.
 
+// No console window next to the GUI on Windows.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod adb;
 mod askpass;
 mod cmdpanel;
 mod commands;
+#[cfg(windows)]
+mod conpty;
 mod devices;
 mod dock;
 mod editor;
@@ -42,13 +47,18 @@ mod sidebar;
 mod state;
 mod status;
 mod store;
+mod sys;
 mod term;
 mod theme;
 mod themeedit;
 mod transfers;
+#[cfg(target_os = "linux")]
 mod usb;
+#[cfg(target_os = "linux")]
 mod usbdecode;
+#[cfg(target_os = "linux")]
 mod usbpage;
+#[cfg(target_os = "linux")]
 mod usbpane;
 mod vt;
 mod tftp;
@@ -82,6 +92,7 @@ fn main() -> glib::ExitCode {
         return askpass::run(&args[1]);
     }
     match args.get(1).map(String::as_str) {
+        #[cfg(target_os = "linux")]
         Some("--usbmon-setup") => {
             return match usb::setup_system() {
                 Ok(()) => glib::ExitCode::SUCCESS,
@@ -91,7 +102,6 @@ fn main() -> glib::ExitCode {
                 }
             };
         }
-        Some("--vt-demo") => return vt::demo(),
         Some("--release-all") => return glib::ExitCode::from(u8::try_from(recover::cli()).unwrap_or(1)),
         Some(watchdog::FLAG) => {
             return match args.get(2).and_then(|p| p.parse::<u32>().ok()) {

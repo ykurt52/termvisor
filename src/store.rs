@@ -2,7 +2,6 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -550,11 +549,10 @@ pub fn import(path: &Path) -> Result<Vec<Entry>, String> {
 
 pub fn write_private(path: &Path, text: &str) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
-    let mut f = OpenOptions::new()
+    let mut f = crate::sys::private(&mut OpenOptions::new())
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
         .open(&tmp)?;
     f.write_all(text.as_bytes())?;
     f.sync_all()?;

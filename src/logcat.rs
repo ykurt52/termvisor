@@ -15,7 +15,6 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use regex::Regex;
-use vte::prelude::*;
 
 use crate::adb::{self, Adb};
 use crate::output::Out;
@@ -122,7 +121,7 @@ enum Ev {
 }
 
 struct View {
-    term: glib::WeakRef<vte::Terminal>,
+    term: glib::WeakRef<crate::vt::View>,
     out: Rc<RefCell<Out>>,
     lines: RefCell<VecDeque<Line>>,
     filter: RefCell<Filter>,
@@ -288,7 +287,7 @@ fn reader(bin: String, serial: String, last: Arc<Mutex<Option<String>>>, child: 
             if let Some(ts) = last.lock().ok().and_then(|g| g.clone()) {
                 args.extend(["-T".into(), ts]);
             }
-            let spawned = adb::tie(&mut Command::new(&bin)).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
+            let spawned = crate::sys::spawn_tied(Command::new(&bin).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()));
             let mut ch = match spawned {
                 Ok(ch) => ch,
                 Err(e) => {
@@ -351,7 +350,7 @@ fn words(s: &str) -> Vec<String> {
 }
 
 /// Builds the pane. Returns the terminal and the leaf widget.
-pub fn build(state: &Rc<State>, launch: &Launch) -> (vte::Terminal, gtk::Widget) {
+pub fn build(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget) {
     let t = term::spawn(state, launch);
     let out = crate::output::of(&t).unwrap_or_else(|| crate::output::attach(&t, &launch.title, &state.cfg.borrow()));
     let serial = launch.adb.as_ref().map(|a| a.serial.clone()).unwrap_or_default();

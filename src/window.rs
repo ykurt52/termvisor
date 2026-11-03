@@ -8,7 +8,6 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use vte::prelude::*;
 
 use crate::dock;
 use crate::multi;
@@ -41,7 +40,7 @@ struct Ui {
     dock: Rc<dock::Dock>,
     vsplit: gtk::Paned,
     /// Last terminal that had the focus.
-    last: Rc<glib::WeakRef<vte::Terminal>>,
+    last: Rc<glib::WeakRef<crate::vt::View>>,
     status: Status,
     quick: gtk::Entry,
     toasts: adw::ToastOverlay,
@@ -55,7 +54,7 @@ impl Ui {
         self.toasts.add_toast(adw::Toast::new(msg));
     }
 
-    fn active(&self) -> Option<vte::Terminal> {
+    fn active(&self) -> Option<crate::vt::View> {
         active(&self.win, &self.view, &self.last)
     }
 
@@ -283,10 +282,10 @@ impl Ui {
 }
 
 /// Terminal that has the keyboard focus.
-fn focused(win: &adw::ApplicationWindow) -> Option<vte::Terminal> {
+fn focused(win: &adw::ApplicationWindow) -> Option<crate::vt::View> {
     gtk::prelude::GtkWindowExt::focus(win)
-        .and_then(|f| f.ancestor(vte::Terminal::static_type()))
-        .and_then(|w| w.downcast::<vte::Terminal>().ok())
+        .and_then(|f| f.ancestor(crate::vt::View::static_type()))
+        .and_then(|w| w.downcast::<crate::vt::View>().ok())
 }
 
 /// Bar shown while multi-exec is on: selection count and a line to send.
@@ -342,7 +341,7 @@ fn multi_bar() -> gtk::Box {
 
 /// Focused terminal, else the last focused one in this window (the focus
 /// may be on a dock control), else the first one in the selected tab.
-fn active(win: &adw::ApplicationWindow, view: &adw::TabView, last: &glib::WeakRef<vte::Terminal>) -> Option<vte::Terminal> {
+fn active(win: &adw::ApplicationWindow, view: &adw::TabView, last: &glib::WeakRef<crate::vt::View>) -> Option<crate::vt::View> {
     focused(win)
         .or_else(|| last.upgrade().filter(|t| t.root().is_some_and(|r| &r == win.upcast_ref::<gtk::Root>())))
         .or_else(|| view.selected_page().and_then(|p| pane::find(&p.child())))
@@ -387,7 +386,7 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     main.set_visible_child_name("welcome");
 
     let dock = Rc::new(dock::build(state));
-    let last: Rc<glib::WeakRef<vte::Terminal>> = Rc::default();
+    let last: Rc<glib::WeakRef<crate::vt::View>> = Rc::default();
     let vsplit = gtk::Paned::new(gtk::Orientation::Vertical);
     vsplit.set_start_child(Some(&main));
     vsplit.set_end_child(Some(&dock.widget));
@@ -567,8 +566,8 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     state.on_cwd(move |t| {
         let (Some(win), Some(st)) = (w.upgrade(), st.upgrade()) else { return };
         let focused = gtk::prelude::GtkWindowExt::focus(&win)
-            .and_then(|f| f.ancestor(vte::Terminal::static_type()))
-            .and_then(|w| w.downcast::<vte::Terminal>().ok());
+            .and_then(|f| f.ancestor(crate::vt::View::static_type()))
+            .and_then(|w| w.downcast::<crate::vt::View>().ok());
         if focused.as_ref() != Some(t) {
             return;
         }
@@ -655,7 +654,7 @@ where
 
 fn on_term<F>(ui: &Ui, name: &str, f: F)
 where
-    F: Fn(&Ui, &vte::Terminal) + 'static,
+    F: Fn(&Ui, &crate::vt::View) + 'static,
 {
     action(ui, name, None, move |u, _| {
         if let Some(t) = u.active() {
@@ -799,7 +798,7 @@ fn add_actions(ui: &Ui) {
         pane::split(&u.state, t, gtk::Orientation::Vertical);
     });
     on_term(ui, "close-pane", |_, t| pane::close(t));
-    on_term(ui, "copy", |_, t| t.copy_clipboard_format(vte::Format::Text));
+    on_term(ui, "copy", |_, t| t.copy_clipboard());
     on_term(ui, "paste", |_, t| t.paste_clipboard());
     on_term(ui, "plot", |_, t| pane::toggle_plot(t));
     on_term(ui, "zoom-in", |_, t| t.set_font_scale((t.font_scale() * 1.1).min(4.0)));

@@ -26,7 +26,7 @@ const COLORS: &[(&str, Option<&str>)] = &[
 const TEXT_HINT: &str = "One command per line. Escapes: \\r \\n \\t \\0 \\\\ \\xHH";
 const HEX_HINT: &str = "Hex bytes: 55 AA 01, 55AA01 or 0x55,0xAA";
 
-type Target = Box<dyn Fn() -> Option<vte::Terminal>>;
+type Target = Box<dyn Fn() -> Option<crate::vt::View>>;
 
 pub struct Panel {
     pub widget: gtk::Box,
@@ -164,7 +164,7 @@ pub fn build(state: &Rc<State>) -> Rc<Panel> {
 
 impl Panel {
     /// Sets how the receiving pane is found (normally the focused one).
-    pub fn set_target(&self, f: impl Fn() -> Option<vte::Terminal> + 'static) {
+    pub fn set_target(&self, f: impl Fn() -> Option<crate::vt::View> + 'static) {
         self.target.replace(Some(Box::new(f)));
     }
 
@@ -533,7 +533,7 @@ impl Panel {
 
 /// Sends the chunks to `t`, `delay_ms` apart. Stream panes get the bytes
 /// on their link; other terminals get them as typed input.
-fn send(t: &vte::Terminal, chunks: Vec<Vec<u8>>, hex: bool, delay_ms: u32) {
+fn send(t: &crate::vt::View, chunks: Vec<Vec<u8>>, hex: bool, delay_ms: u32) {
     let mut wait = 0u64;
     for c in chunks {
         let w = t.downgrade();

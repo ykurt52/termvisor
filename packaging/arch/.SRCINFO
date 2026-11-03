@@ -9,7 +9,6 @@ pkgbase = termvisor
 	makedepends = cargo
 	depends = gtk4
 	depends = libadwaita
-	depends = vte4
 	depends = libsecret
 	depends = systemd-libs
 	depends = glib2

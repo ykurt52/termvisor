@@ -252,18 +252,13 @@ impl Inner {
 
 /// Private folder for files opened in a local editor.
 fn edit_dir() -> Result<PathBuf, String> {
-    use std::os::unix::fs::DirBuilderExt;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let dir = glib::user_runtime_dir()
         .join("termvisor")
         .join("edit")
         .join(format!("{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?;
+    crate::sys::private_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     Ok(dir)
 }
 

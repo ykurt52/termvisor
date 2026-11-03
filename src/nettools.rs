@@ -1,7 +1,6 @@
 // Network tools without root: TCP port scanner, ping (system ping) and
 // traceroute (tracepath) with parsed output, and Wake-on-LAN.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
 use std::process::{Command, Stdio};
@@ -12,7 +11,6 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::adb::tie;
 
 /// Hosts at most in one scan.
 const MAX_HOSTS: usize = 4096;
@@ -184,11 +182,13 @@ pub enum Ping {
     Ended,
 }
 
+#[cfg(unix)]
 fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     line.split_whitespace().find_map(|w| w.strip_prefix(key))
 }
 
 /// A line of `LC_ALL=C ping -n -O`.
+#[cfg(unix)]
 pub fn parse_ping(line: &str) -> Ping {
     let l = line.trim_end();
     if l.contains(" bytes from ") {
@@ -209,14 +209,10 @@ pub fn parse_ping(line: &str) -> Ping {
 
 /// Runs `prog args` with C locale; each output line goes through `parse`.
 fn lines<T: Send + 'static>(prog: &str, args: &[String], parse: fn(&str) -> T, end: T, stop: Arc<AtomicBool>, tx: async_channel::Sender<T>) -> Result<(), String> {
-    let mut ch = tie(&mut Command::new(prog))
-        .args(args)
-        .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("{prog}: {e}"))?;
+    let mut ch = crate::sys::spawn_tied(
+        Command::new(prog).args(args).env("LC_ALL", "C").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()),
+    )
+    .map_err(|e| format!("{prog}: {e}"))?;
     let out = ch.stdout.take();
     let err = ch.stderr.take();
     let child = Arc::new(Mutex::new(ch));
@@ -258,9 +254,56 @@ fn lines<T: Send + 'static>(prog: &str, args: &[String], parse: fn(&str) -> T, e
 }
 
 /// `ping` every `interval` seconds until stopped.
+#[cfg(unix)]
 pub fn ping(host: &str, interval: f64, stop: Arc<AtomicBool>, tx: async_channel::Sender<Ping>) -> Result<(), String> {
     let args = vec!["-n".into(), "-O".into(), "-i".into(), format!("{interval:.1}"), "--".into(), host.to_string()];
     lines("ping", &args, parse_ping, Ping::Ended, stop, tx)
+}
+
+/// Echo requests through the ICMP API: the ping program's output depends
+/// on the system language.
+#[cfg(windows)]
+pub fn ping(host: &str, interval: f64, stop: Arc<AtomicBool>, tx: async_channel::Sender<Ping>) -> Result<(), String> {
+    use std::net::ToSocketAddrs;
+    use windows_sys::Win32::NetworkManagement::IpHelper::{IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho, ICMP_ECHO_REPLY};
+    let ip = (host, 0)
+        .to_socket_addrs()
+        .map_err(|e| format!("{host}: {e}"))?
+        .find_map(|a| match a.ip() {
+            IpAddr::V4(v) => Some(v),
+            IpAddr::V6(_) => None,
+        })
+        .ok_or_else(|| format!("{host}: no IPv4 address"))?;
+    let _ = tx.send_blocking(Ping::Text(format!("PING {host} ({ip})")));
+    thread::spawn(move || {
+        // SAFETY: one handle for this thread, closed at the end; buffers outlive each call.
+        unsafe {
+            let h = IcmpCreateFile();
+            let data = [0x61u8; 32];
+            let mut reply = vec![0u8; std::mem::size_of::<ICMP_ECHO_REPLY>() + data.len() + 8];
+            let mut seq = 0u32;
+            while !stop.load(Ordering::Acquire) {
+                seq += 1;
+                let dest = u32::from_ne_bytes(ip.octets());
+                let n = IcmpSendEcho(h, dest, data.as_ptr() as *const _, data.len() as u16, std::ptr::null(), reply.as_mut_ptr() as *mut _, reply.len() as u32, 1000);
+                let r = &*(reply.as_ptr() as *const ICMP_ECHO_REPLY);
+                let ev = if n > 0 && r.Status == 0 {
+                    Ping::Reply { seq, ttl: u32::from(r.Options.Ttl), ms: f64::from(r.RoundTripTime) }
+                } else {
+                    Ping::Lost { seq }
+                };
+                if tx.send_blocking(ev).is_err() {
+                    break;
+                }
+                let wait = Duration::from_secs_f64(interval.max(0.2));
+                let waited = if n > 0 { Duration::from_millis(u64::from(r.RoundTripTime)) } else { Duration::from_secs(1) };
+                thread::sleep(wait.saturating_sub(waited));
+            }
+            IcmpCloseHandle(h);
+        }
+        let _ = tx.send_blocking(Ping::Ended);
+    });
+    Ok(())
 }
 
 /// Line of `tracepath -n` output, or Ended.
@@ -275,6 +318,9 @@ fn trace_line(l: &str) -> Trace {
 }
 
 pub fn trace(host: &str, stop: Arc<AtomicBool>, tx: async_channel::Sender<Trace>) -> Result<(), String> {
+    if cfg!(windows) {
+        return lines("tracert", &["-d".into(), host.to_string()], trace_line, Trace::Ended, stop, tx);
+    }
     lines("tracepath", &["-n".into(), "--".into(), host.to_string()], trace_line, Trace::Ended, stop, tx)
 }
 
@@ -425,6 +471,19 @@ pub fn save_tools(f: &ToolsFile) -> Result<(), String> {
 }
 
 /// This machine's IPv4 addresses (for server URLs), loopback last.
+#[cfg(windows)]
+pub fn local_ips() -> Vec<IpAddr> {
+    // The address the system would send from; connecting UDP sends nothing.
+    let main = std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| s.connect("192.0.2.1:9").and_then(|_| s.local_addr()))
+        .ok()
+        .map(|a| a.ip())
+        .filter(|ip| !ip.is_unspecified());
+    main.into_iter().chain([IpAddr::V4(Ipv4Addr::LOCALHOST)]).collect()
+}
+
+/// This machine's IPv4 addresses (for server URLs), loopback last.
+#[cfg(unix)]
 pub fn local_ips() -> Vec<IpAddr> {
     let mut out: Vec<IpAddr> = Vec::new();
     // SAFETY: getifaddrs/freeifaddrs pair; entries are read before freeing.
@@ -443,7 +502,7 @@ pub fn local_ips() -> Vec<IpAddr> {
             libc::freeifaddrs(list);
         }
     }
-    let mut seen = HashMap::new();
+    let mut seen = std::collections::HashMap::new();
     out.retain(|ip| seen.insert(*ip, ()).is_none());
     out.sort_by_key(|ip| ip.is_loopback());
     out

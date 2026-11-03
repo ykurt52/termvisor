@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::{gdk, glib, prelude::*};
-use vte::prelude::*;
 
 use crate::commands::{self, Page};
 use crate::recent::{self, Recent};
@@ -14,7 +13,7 @@ use crate::term::Launch;
 use crate::theme::{self, Theme};
 use crate::xfers::Xfers;
 
-type TermFn = Box<dyn Fn(&vte::Terminal)>;
+type TermFn = Box<dyn Fn(&crate::vt::View)>;
 
 pub struct State {
     themes: RefCell<Vec<Theme>>,
@@ -38,7 +37,7 @@ pub struct State {
     cwd_listeners: RefCell<Vec<TermFn>>,
     /// One-time message for the first window (e.g. startup cleanup).
     pub notice: RefCell<Option<String>>,
-    terms: RefCell<Vec<(glib::WeakRef<vte::Terminal>, Launch)>>,
+    terms: RefCell<Vec<(glib::WeakRef<crate::vt::View>, Launch)>>,
     css: gtk::CssProvider,
 }
 
@@ -261,18 +260,18 @@ impl State {
         }
     }
 
-    pub fn on_cwd(&self, f: impl Fn(&vte::Terminal) + 'static) {
+    pub fn on_cwd(&self, f: impl Fn(&crate::vt::View) + 'static) {
         self.cwd_listeners.borrow_mut().push(Box::new(f));
     }
 
-    pub fn cwd_changed(&self, t: &vte::Terminal) {
+    pub fn cwd_changed(&self, t: &crate::vt::View) {
         for f in self.cwd_listeners.borrow().iter() {
             f(t);
         }
     }
 
     /// Registers a terminal so theme changes reach it.
-    pub fn track(&self, term: &vte::Terminal, launch: &Launch) {
+    pub fn track(&self, term: &crate::vt::View, launch: &Launch) {
         let mut terms = self.terms.borrow_mut();
         terms.retain(|(w, _)| w.upgrade().is_some());
         terms.push((term.downgrade(), launch.clone()));
@@ -283,7 +282,7 @@ impl State {
     }
 
     /// What `term` was launched with.
-    pub fn launch(&self, term: &vte::Terminal) -> Option<Launch> {
+    pub fn launch(&self, term: &crate::vt::View) -> Option<Launch> {
         self.terms
             .borrow()
             .iter()
@@ -306,7 +305,7 @@ impl State {
         }
         self.css.load_from_string(&t.css);
 
-        let terms: Vec<(vte::Terminal, Launch)> = {
+        let terms: Vec<(crate::vt::View, Launch)> = {
             let mut terms = self.terms.borrow_mut();
             terms.retain(|(w, _)| w.upgrade().is_some());
             terms.iter().filter_map(|(w, l)| w.upgrade().map(|t| (t, l.clone()))).collect()
@@ -323,7 +322,7 @@ pub fn theme_dir() -> std::path::PathBuf {
     settings::dir().join("themes")
 }
 
-fn paint(term: &vte::Terminal, t: &Theme) {
+fn paint(term: &crate::vt::View, t: &Theme) {
     let c = &t.colors;
     let palette: Vec<&gdk::RGBA> = c.palette.iter().collect();
     term.set_colors(Some(&c.fg), Some(&c.bg), &palette);

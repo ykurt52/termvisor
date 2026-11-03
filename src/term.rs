@@ -1,12 +1,10 @@
 // Terminal creation and child process launch.
 
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk::{gio, glib, pango, prelude::*};
-use vte::prelude::*;
 
 use crate::adb::{self, AdbLaunch};
 use crate::askpass;
@@ -307,6 +305,9 @@ impl Launch {
 }
 
 fn shell() -> String {
+    if cfg!(windows) {
+        return if found("pwsh") { "pwsh.exe" } else { "powershell.exe" }.into();
+    }
     std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty() && Path::new(s).exists())
@@ -314,19 +315,17 @@ fn shell() -> String {
 }
 
 /// Working directory reported by the shell (OSC 7), if any.
-pub fn cwd(term: &vte::Terminal) -> Option<String> {
+pub fn cwd(term: &crate::vt::View) -> Option<String> {
     let uri = term.current_directory_uri()?;
     let path = gio::File::for_uri(&uri).path()?;
     path.to_str().map(str::to_string)
 }
 
 /// Creates a terminal and starts `launch` in it.
-pub fn spawn(state: &Rc<State>, launch: &Launch) -> vte::Terminal {
-    let term: vte::Terminal = pty::Term::default().upcast();
+pub fn spawn(state: &Rc<State>, launch: &Launch) -> crate::vt::View {
+    let term: crate::vt::View = pty::Term::default().upcast();
     term.set_hexpand(true);
     term.set_vexpand(true);
-    term.set_mouse_autohide(true);
-    term.set_audible_bell(false);
     {
         let cfg = state.cfg.borrow();
         term.set_scrollback_lines(cfg.scrollback as _);
@@ -354,7 +353,7 @@ pub fn mux_dir() -> Option<PathBuf> {
     if dir.as_os_str().len() > 60 {
         return None;
     }
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).ok()?;
+    crate::sys::private_dir(&dir).ok()?;
     Some(dir)
 }
 
@@ -407,7 +406,7 @@ pub fn ssh_env(target: &str, keyring: bool) -> Vec<String> {
 }
 
 /// Starts (or restarts) the child process of `term` on its own pty.
-pub fn run(term: &vte::Terminal, launch: &Launch) {
+pub fn run(term: &crate::vt::View, launch: &Launch) {
     // Stream and logcat panes have no child here; they feed the terminal.
     if launch.stream.is_some() || matches!(launch.kind, Kind::Logcat | Kind::Usb | Kind::Tool) {
         return;
@@ -441,7 +440,7 @@ pub fn run(term: &vte::Terminal, launch: &Launch) {
 }
 
 /// Wraps a terminal in a scrolled window.
-pub fn scroll(term: &vte::Terminal) -> gtk::ScrolledWindow {
+pub fn scroll(term: &crate::vt::View) -> gtk::ScrolledWindow {
     let sw = gtk::ScrolledWindow::new();
     sw.set_hscrollbar_policy(gtk::PolicyType::Never);
     sw.set_hexpand(true);
@@ -452,11 +451,9 @@ pub fn scroll(term: &vte::Terminal) -> gtk::ScrolledWindow {
 
 /// True when `prog` is an executable on PATH.
 pub fn found(prog: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
+    let names = if cfg!(windows) { vec![prog.to_string(), format!("{prog}.exe")] } else { vec![prog.to_string()] };
     std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|d| {
-            fs::metadata(d.join(prog)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
+        std::env::split_paths(&paths).any(|d| names.iter().any(|n| fs::metadata(d.join(n)).is_ok_and(|m| crate::sys::executable(&m))))
     })
 }
 

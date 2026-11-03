@@ -8,7 +8,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -313,7 +312,7 @@ fn download(s: &mut dyn Remote, remote: &str, local: &Path, ctx: &mut Ctx) -> Re
         Ok(n) => {
             fs::rename(&part, &target).map_err(|e| format!("{}: {e}", target.display()))?;
             if let Some(p) = a.perm {
-                let _ = fs::set_permissions(&target, fs::Permissions::from_mode(p & 0o777));
+                crate::sys::set_mode(&target, p);
             }
             ctx.done = base + n;
             Ok(())
@@ -377,7 +376,7 @@ fn upload(s: &mut dyn Remote, local: &Path, remote: &str, ctx: &mut Ctx) -> Resu
     }
     ctx.done += start;
     let base = ctx.done;
-    let mode = meta.permissions().mode() & 0o777;
+    let mode = crate::sys::mode(&meta).unwrap_or(0o644);
     let res = s.upload(&mut f, &part, mode, start, &mut |n| ctx.tick(base, n));
     let n = match res {
         Ok(n) => n,

@@ -317,9 +317,65 @@ fn draw_special(s: &gtk::Snapshot, c: char, x: f32, y: f32, w: f32, h: f32, colo
     true
 }
 
-type Commit = Box<dyn Fn(&View, &str)>;
-type Resized = Box<dyn Fn(usize, usize)>;
-type Titled = Box<dyn Fn(&str)>;
+/// Finds OSC 7 (working directory) in program output, across chunks.
+/// The emulator ignores it; shells send it after each command.
+#[derive(Default)]
+pub(crate) struct Osc7 {
+    /// Bytes of the "ESC ] 7 ;" start matched so far.
+    matched: usize,
+    body: Option<Vec<u8>>,
+    esc: bool,
+}
+
+impl Osc7 {
+    /// Last complete URI in `data`, if any.
+    fn scan(&mut self, data: &[u8]) -> Option<String> {
+        const START: &[u8] = b"\x1b]7;";
+        let mut found = None;
+        for &b in data {
+            if let Some(body) = self.body.as_mut() {
+                let end = b == 0x07 || (self.esc && b == b'\\');
+                if end {
+                    found = Some(String::from_utf8_lossy(body).into_owned());
+                    self.body = None;
+                } else if b == 0x1b {
+                    self.esc = true;
+                } else if self.esc || body.len() > 4096 {
+                    // Not a string terminator: not ours.
+                    self.body = None;
+                } else {
+                    body.push(b);
+                }
+                continue;
+            }
+            if b == START[self.matched] {
+                self.matched += 1;
+                if self.matched == START.len() {
+                    self.matched = 0;
+                    self.body = Some(Vec::new());
+                    self.esc = false;
+                }
+            } else {
+                self.matched = usize::from(b == 0x1b);
+            }
+        }
+        found
+    }
+}
+
+/// Mouse report bytes. `button` holds the button code plus modifier and
+/// motion bits; release in the classic form is button 3.
+fn mouse_bytes(button: u8, press: bool, col: usize, row: usize, sgr: bool) -> String {
+    if sgr {
+        let end = if press { 'M' } else { 'm' };
+        return format!("\x1b[<{button};{};{}{end}", col + 1, row + 1);
+    }
+    let b = if press { button } else { (button & !3) | 3 };
+    // The classic form tops out at column and row 223.
+    let pos = |v: usize| char::from((v.min(222) + 33) as u8);
+    format!("\x1b[M{}{}{}", char::from(32 + b), pos(col), pos(row))
+}
+
 
 mod imp {
     use super::*;
@@ -338,12 +394,28 @@ mod imp {
         pub(super) size: Cell<(usize, usize)>,
         pub(super) scrollback: Cell<usize>,
         pub(super) title: RefCell<String>,
-        pub(super) commit: RefCell<Vec<Commit>>,
-        pub(super) resized: RefCell<Vec<Resized>>,
-        pub(super) titled: RefCell<Vec<Titled>>,
+        /// Working directory URI from OSC 7.
+        pub(super) cwd: RefCell<Option<String>>,
+        pub(super) osc7: RefCell<Osc7>,
+        /// Pointer hidden while typing.
+        pub(super) hidden: Cell<bool>,
         pub(super) im: gtk::IMMulticontext,
         /// Fractional scroll steps of smooth scrolling.
         pub(super) wheel: Cell<f64>,
+        pub(super) vadj: RefCell<Option<gtk::Adjustment>>,
+        pub(super) hadj: RefCell<Option<gtk::Adjustment>>,
+        pub(super) policy: Cell<(gtk::ScrollablePolicy, gtk::ScrollablePolicy)>,
+        /// Set while the adjustment follows the view, so its own change is ignored.
+        pub(super) syncing: Cell<bool>,
+        /// Cursor shown in the blink cycle.
+        pub(super) blink_on: Cell<bool>,
+        pub(super) blink: RefCell<Option<glib::SourceId>>,
+        /// Last pointer position, for wheel reports.
+        pub(super) pointer: Cell<(f64, f64)>,
+        /// Button held while a program gets mouse reports.
+        pub(super) held: Cell<Option<u8>>,
+        /// Last reported cell, so motion is sent once per cell.
+        pub(super) reported: Cell<(usize, usize)>,
     }
 
     impl Default for View {
@@ -362,11 +434,20 @@ mod imp {
                 size: Cell::new((80, 24)),
                 scrollback: Cell::new(Config::default().scrolling_history),
                 title: RefCell::default(),
-                commit: RefCell::default(),
-                resized: RefCell::default(),
-                titled: RefCell::default(),
+                cwd: RefCell::default(),
+                osc7: RefCell::default(),
+                hidden: Cell::new(false),
                 im: gtk::IMMulticontext::new(),
                 wheel: Cell::new(0.0),
+                vadj: RefCell::default(),
+                hadj: RefCell::default(),
+                policy: Cell::new((gtk::ScrollablePolicy::Minimum, gtk::ScrollablePolicy::Minimum)),
+                syncing: Cell::new(false),
+                blink_on: Cell::new(true),
+                blink: RefCell::default(),
+                pointer: Cell::new((0.0, 0.0)),
+                held: Cell::new(None),
+                reported: Cell::new((usize::MAX, usize::MAX)),
             }
         }
     }
@@ -376,6 +457,7 @@ mod imp {
         const NAME: &'static str = "TvView";
         type Type = super::View;
         type ParentType = gtk::Widget;
+        type Interfaces = (gtk::Scrollable,);
 
         fn class_init(klass: &mut Self::Class) {
             klass.set_css_name("termview");
@@ -383,6 +465,53 @@ mod imp {
     }
 
     impl ObjectImpl for View {
+        // Same names and arguments as VTE's signals.
+        fn signals() -> &'static [glib::subclass::Signal] {
+            static SIGNALS: std::sync::OnceLock<Vec<glib::subclass::Signal>> = std::sync::OnceLock::new();
+            SIGNALS.get_or_init(|| {
+                use glib::subclass::Signal;
+                vec![
+                    Signal::builder("commit").param_types([String::static_type(), u32::static_type()]).build(),
+                    Signal::builder("child-exited").param_types([i32::static_type()]).build(),
+                    Signal::builder("window-title-changed").build(),
+                    Signal::builder("current-directory-uri-changed").build(),
+                ]
+            })
+        }
+
+        // gtk::Scrollable: a scrolled window shows the scrollback as a scrollbar.
+        fn properties() -> &'static [glib::ParamSpec] {
+            static PROPS: std::sync::OnceLock<Vec<glib::ParamSpec>> = std::sync::OnceLock::new();
+            PROPS.get_or_init(|| {
+                ["hadjustment", "vadjustment", "hscroll-policy", "vscroll-policy"]
+                    .into_iter()
+                    .map(glib::ParamSpecOverride::for_interface::<gtk::Scrollable>)
+                    .collect()
+            })
+        }
+
+        fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
+            let (h, v) = self.policy.get();
+            match pspec.name() {
+                "hadjustment" => {
+                    self.hadj.replace(value.get().ok().flatten());
+                }
+                "vadjustment" => self.obj().set_vadj(value.get().ok().flatten()),
+                "hscroll-policy" => self.policy.set((value.get().unwrap_or(h), v)),
+                "vscroll-policy" => self.policy.set((h, value.get().unwrap_or(v))),
+                _ => {}
+            }
+        }
+
+        fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "hadjustment" => self.hadj.borrow().to_value(),
+                "vadjustment" => self.vadj.borrow().to_value(),
+                "hscroll-policy" => self.policy.get().0.to_value(),
+                _ => self.policy.get().1.to_value(),
+            }
+        }
+
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
@@ -395,6 +524,8 @@ mod imp {
             obj.setup_input();
         }
     }
+
+    impl ScrollableImpl for View {}
 
     impl WidgetImpl for View {
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
@@ -417,10 +548,15 @@ mod imp {
     }
 }
 
+/// Widgets built on the view (the pty terminal).
+pub trait ViewImpl: WidgetImpl + ObjectSubclass<Type: IsA<View>> {}
+
+unsafe impl<T: ViewImpl> IsSubclassable<T> for View {}
+
 glib::wrapper! {
     pub struct View(ObjectSubclass<imp::View>)
         @extends gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Scrollable;
 }
 
 impl Default for View {
@@ -433,26 +569,67 @@ impl View {
     /// Runs program output through the emulator.
     pub fn feed(&self, data: &[u8]) {
         let imp = self.imp();
+        let uri = imp.osc7.borrow_mut().scan(data);
+        if let Some(uri) = uri {
+            if imp.cwd.borrow().as_deref() != Some(uri.as_str()) {
+                imp.cwd.replace(Some(uri));
+                self.emit_by_name::<()>("current-directory-uri-changed", &[]);
+            }
+        }
         {
             let mut term = imp.term.borrow_mut();
             imp.parser.borrow_mut().advance(&mut *term, data);
         }
         self.handle_events();
+        self.sync_scroll();
+        if self.has_focus() {
+            self.restart_blink();
+        }
         self.queue_draw();
     }
 
-    /// Text typed or pasted, and replies to terminal queries.
-    pub fn connect_commit(&self, f: impl Fn(&View, &str) + 'static) {
-        self.imp().commit.borrow_mut().push(Box::new(f));
+    /// Text typed or pasted, and replies to terminal queries; with its
+    /// length in bytes.
+    pub fn connect_commit(&self, f: impl Fn(&View, &str, u32) + 'static) -> glib::SignalHandlerId {
+        self.connect_local("commit", false, move |args| {
+            if let (Ok(v), Ok(text), Ok(n)) = (args[0].get::<View>(), args[1].get::<String>(), args[2].get::<u32>()) {
+                f(&v, &text, n);
+            }
+            None
+        })
     }
 
-    /// New size in columns and rows.
-    pub fn connect_resized(&self, f: impl Fn(usize, usize) + 'static) {
-        self.imp().resized.borrow_mut().push(Box::new(f));
+    /// The program ended, with its wait status.
+    pub fn connect_child_exited(&self, f: impl Fn(&View, i32) + 'static) -> glib::SignalHandlerId {
+        self.connect_local("child-exited", false, move |args| {
+            if let (Ok(v), Ok(status)) = (args[0].get::<View>(), args[1].get::<i32>()) {
+                f(&v, status);
+            }
+            None
+        })
     }
 
-    pub fn connect_title_changed(&self, f: impl Fn(&str) + 'static) {
-        self.imp().titled.borrow_mut().push(Box::new(f));
+    pub fn connect_window_title_changed(&self, f: impl Fn(&View) + 'static) -> glib::SignalHandlerId {
+        self.connect_local("window-title-changed", false, move |args| {
+            if let Ok(v) = args[0].get::<View>() {
+                f(&v);
+            }
+            None
+        })
+    }
+
+    pub fn connect_current_directory_uri_changed(&self, f: impl Fn(&View) + 'static) -> glib::SignalHandlerId {
+        self.connect_local("current-directory-uri-changed", false, move |args| {
+            if let Ok(v) = args[0].get::<View>() {
+                f(&v);
+            }
+            None
+        })
+    }
+
+    /// Working directory the shell reported (OSC 7), as a file URI.
+    pub fn current_directory_uri(&self) -> Option<String> {
+        self.imp().cwd.borrow().clone()
     }
 
     pub fn column_count(&self) -> i64 {
@@ -463,8 +640,9 @@ impl View {
         self.imp().size.get().1 as i64
     }
 
-    pub fn window_title(&self) -> String {
-        self.imp().title.borrow().clone()
+    pub fn window_title(&self) -> Option<String> {
+        let t = self.imp().title.borrow();
+        (!t.is_empty()).then(|| t.clone())
     }
 
     pub fn set_font(&self, font: Option<&pango::FontDescription>) {
@@ -520,6 +698,7 @@ impl View {
             imp.parser.borrow_mut().advance(&mut *imp.term.borrow_mut(), b"\x1bc");
         }
         imp.parser.replace(Processor::new());
+        self.sync_scroll();
         self.queue_draw();
     }
 
@@ -563,11 +742,16 @@ impl View {
     /// User input: back to the bottom, then to the commit handlers.
     fn send(&self, text: &str) {
         let imp = self.imp();
+        self.restart_blink();
+        if !imp.hidden.replace(true) {
+            self.set_cursor_from_name(Some("none"));
+        }
         {
             let mut term = imp.term.borrow_mut();
             if term.grid().display_offset() != 0 {
                 term.scroll_display(Scroll::Bottom);
                 drop(term);
+                self.sync_scroll();
                 self.queue_draw();
             }
         }
@@ -575,15 +759,8 @@ impl View {
     }
 
     fn emit_commit(&self, text: &str) {
-        let handlers = self.imp().commit.take();
-        for f in &handlers {
-            f(self, text);
-        }
-        // Keep handlers added while running.
-        let mut now = self.imp().commit.borrow_mut();
-        let added = std::mem::take(&mut *now);
-        *now = handlers;
-        now.extend(added);
+        let n = u32::try_from(text.len()).unwrap_or(u32::MAX);
+        self.emit_by_name::<()>("commit", &[&text, &n]);
     }
 
     fn handle_events(&self) {
@@ -619,10 +796,8 @@ impl View {
         if *self.imp().title.borrow() == t {
             return;
         }
-        self.imp().title.replace(t.clone());
-        for f in self.imp().titled.borrow().iter() {
-            f(&t);
-        }
+        self.imp().title.replace(t);
+        self.emit_by_name::<()>("window-title-changed", &[]);
     }
 
     fn scaled_font(&self) -> pango::FontDescription {
@@ -661,9 +836,7 @@ impl View {
             return;
         }
         imp.term.borrow_mut().resize(Size { cols, rows });
-        for f in imp.resized.borrow().iter() {
-            f(cols, rows);
-        }
+        self.sync_scroll();
         self.queue_draw();
     }
 
@@ -703,6 +876,7 @@ impl View {
             if shift && matches!(key, gdk::Key::Page_Up | gdk::Key::Page_Down) {
                 let s = if key == gdk::Key::Page_Up { Scroll::PageUp } else { Scroll::PageDown };
                 v.imp().term.borrow_mut().scroll_display(s);
+                v.sync_scroll();
                 v.queue_draw();
                 return glib::Propagation::Stop;
             }
@@ -727,6 +901,7 @@ impl View {
             if let Some(v) = v.upgrade() {
                 v.imp().im.focus_in();
                 v.focus_report(true);
+                v.restart_blink();
                 v.queue_draw();
             }
         });
@@ -735,10 +910,68 @@ impl View {
             if let Some(v) = v.upgrade() {
                 v.imp().im.focus_out();
                 v.focus_report(false);
+                if let Some(id) = v.imp().blink.take() {
+                    id.remove();
+                }
+                v.imp().blink_on.set(true);
                 v.queue_draw();
             }
         });
         self.add_controller(focus);
+
+        // Programs that ask for the mouse get it; Shift keeps it for selecting.
+        let report = gtk::GestureClick::new();
+        report.set_button(0);
+        report.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let v = self.downgrade();
+        report.connect_pressed(move |g, _, x, y| {
+            let Some(v) = v.upgrade() else { return };
+            let m = g.current_event_state();
+            if !v.reporting(m) {
+                return;
+            }
+            v.grab_focus();
+            let b = match g.current_button() {
+                gdk::BUTTON_PRIMARY => 0,
+                gdk::BUTTON_MIDDLE => 1,
+                gdk::BUTTON_SECONDARY => 2,
+                _ => return,
+            };
+            v.imp().held.set(Some(b));
+            v.mouse_report(b, true, x, y, m);
+            g.set_state(gtk::EventSequenceState::Claimed);
+        });
+        let v = self.downgrade();
+        report.connect_released(move |g, _, x, y| {
+            let Some(v) = v.upgrade() else { return };
+            if let Some(b) = v.imp().held.take() {
+                v.mouse_report(b, false, x, y, g.current_event_state());
+            }
+        });
+        self.add_controller(report);
+
+        let motion = gtk::EventControllerMotion::new();
+        let v = self.downgrade();
+        motion.connect_motion(move |c, x, y| {
+            let Some(v) = v.upgrade() else { return };
+            if v.imp().hidden.replace(false) {
+                v.set_cursor_from_name(Some("text"));
+            }
+            v.imp().pointer.set((x, y));
+            let mode = *v.imp().term.borrow().mode();
+            let held = v.imp().held.get();
+            let wanted = mode.contains(TermMode::MOUSE_MOTION) || (held.is_some() && mode.contains(TermMode::MOUSE_DRAG));
+            if !wanted || !v.reporting(c.current_event_state()) {
+                return;
+            }
+            let cell = v.cell_at(x, y);
+            if v.imp().reported.replace(cell) == cell {
+                return;
+            }
+            // Motion adds 32; with no button held the button is 3.
+            v.mouse_report(32 + held.unwrap_or(3), true, x, y, c.current_event_state());
+        });
+        self.add_controller(motion);
 
         // Press starts a selection (double: word, triple: line); drag extends it.
         let click = gtk::GestureClick::new();
@@ -806,15 +1039,97 @@ impl View {
 
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         let v = self.downgrade();
-        scroll.connect_scroll(move |_, _, dy| {
+        scroll.connect_scroll(move |c, _, dy| {
             let Some(v) = v.upgrade() else { return glib::Propagation::Proceed };
-            v.wheel(dy);
+            v.wheel(dy, c.current_event_state());
             glib::Propagation::Stop
         });
         self.add_controller(scroll);
     }
 
-    fn wheel(&self, dy: f64) {
+    /// Shows the cursor and starts its blink cycle again, as the desktop
+    /// settings say.
+    fn restart_blink(&self) {
+        let imp = self.imp();
+        imp.blink_on.set(true);
+        if let Some(id) = imp.blink.take() {
+            id.remove();
+        }
+        let settings = self.settings();
+        if !settings.is_gtk_cursor_blink() {
+            return;
+        }
+        let half = u64::try_from(settings.gtk_cursor_blink_time() / 2).unwrap_or(600).max(100);
+        let v = self.downgrade();
+        let id = glib::timeout_add_local(std::time::Duration::from_millis(half), move || {
+            let Some(v) = v.upgrade() else { return glib::ControlFlow::Break };
+            v.imp().blink_on.set(!v.imp().blink_on.get());
+            v.queue_draw();
+            glib::ControlFlow::Continue
+        });
+        imp.blink.replace(Some(id));
+    }
+
+    fn set_vadj(&self, adj: Option<gtk::Adjustment>) {
+        if let Some(a) = &adj {
+            let v = self.downgrade();
+            a.connect_value_changed(move |a| {
+                let Some(v) = v.upgrade() else { return };
+                if v.imp().syncing.get() {
+                    return;
+                }
+                // Value counts lines from the top of the scrollback.
+                let want = (a.upper() - a.page_size() - a.value()).round().max(0.0) as i32;
+                let now = v.imp().term.borrow().grid().display_offset() as i32;
+                if want != now {
+                    v.imp().term.borrow_mut().scroll_display(Scroll::Delta(want - now));
+                    v.queue_draw();
+                }
+            });
+        }
+        self.imp().vadj.replace(adj);
+        self.sync_scroll();
+    }
+
+    /// Puts the scrollbar where the view is: one step per line.
+    fn sync_scroll(&self) {
+        let imp = self.imp();
+        let Some(a) = imp.vadj.borrow().clone() else { return };
+        let (history, offset) = {
+            let term = imp.term.borrow();
+            (term.grid().history_size(), term.grid().display_offset())
+        };
+        let rows = imp.size.get().1 as f64;
+        let upper = history as f64 + rows;
+        imp.syncing.set(true);
+        a.configure(upper - rows - offset as f64, 0.0, upper, 1.0, rows, rows);
+        imp.syncing.set(false);
+    }
+
+    /// True when a program wants mouse events and Shift is not held.
+    fn reporting(&self, m: gdk::ModifierType) -> bool {
+        self.imp().term.borrow().mode().intersects(TermMode::MOUSE_MODE) && !m.contains(gdk::ModifierType::SHIFT_MASK)
+    }
+
+    /// Screen column and row under widget coordinates.
+    fn cell_at(&self, x: f64, y: f64) -> (usize, usize) {
+        let (w, h) = self.imp().cell.get();
+        let (cols, rows) = self.imp().size.get();
+        (((x / w).max(0.0) as usize).min(cols - 1), ((y / h).max(0.0) as usize).min(rows - 1))
+    }
+
+    /// Sends a mouse event as the program asked: SGR or the classic form.
+    fn mouse_report(&self, button: u8, press: bool, x: f64, y: f64, m: gdk::ModifierType) {
+        let (col, row) = self.cell_at(x, y);
+        self.imp().reported.set((col, row));
+        let mods = 4 * u8::from(m.contains(gdk::ModifierType::SHIFT_MASK))
+            + 8 * u8::from(m.contains(gdk::ModifierType::ALT_MASK))
+            + 16 * u8::from(m.contains(gdk::ModifierType::CONTROL_MASK));
+        let sgr = self.imp().term.borrow().mode().contains(TermMode::SGR_MOUSE);
+        self.emit_commit(&mouse_bytes(button + mods, press, col, row, sgr));
+    }
+
+    fn wheel(&self, dy: f64, m: gdk::ModifierType) {
         let imp = self.imp();
         let acc = imp.wheel.get() + dy * 3.0;
         let lines = acc.trunc() as i32;
@@ -823,6 +1138,14 @@ impl View {
             return;
         }
         let mode = *imp.term.borrow().mode();
+        if self.reporting(m) {
+            let (x, y) = imp.pointer.get();
+            let b = if lines < 0 { 64 } else { 65 };
+            for _ in 0..lines.unsigned_abs() {
+                self.mouse_report(b, true, x, y, m);
+            }
+            return;
+        }
         // Full-screen programs get arrow keys instead.
         if mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL) {
             let key = match (lines < 0, mode.contains(TermMode::APP_CURSOR)) {
@@ -835,6 +1158,7 @@ impl View {
             return;
         }
         imp.term.borrow_mut().scroll_display(Scroll::Delta(-lines));
+        self.sync_scroll();
         self.queue_draw();
     }
 
@@ -967,7 +1291,9 @@ impl View {
             let y = (f64::from(row) * ch) as f32;
             let w = (cw * if wide { 2.0 } else { 1.0 }) as f32;
             let full = graphene::Rect::new(x, y, w, ch as f32);
+            let shown = imp.blink_on.get() || !focused;
             match (focused, cursor.shape) {
+                _ if !shown => {}
                 (true, CursorShape::Beam) => snapshot.append_color(&color, &graphene::Rect::new(x, y, 2.0, ch as f32)),
                 (true, CursorShape::Underline) => snapshot.append_color(&color, &graphene::Rect::new(x, y + ch as f32 - 2.0, w, 2.0)),
                 (true, _) => {
@@ -992,84 +1318,6 @@ impl View {
     }
 }
 
-/// Opens a window with the current terminal and this view side by side,
-/// each running the login shell, to compare them.
-pub fn demo() -> glib::ExitCode {
-    use vte::prelude::*;
-    let app = gtk::Application::builder().application_id("io.github.ykurt52.termvisor.vtdemo").flags(gtk::gio::ApplicationFlags::NON_UNIQUE).build();
-    app.connect_activate(|app| {
-        let cfg = crate::settings::Settings::load();
-        let font = pango::FontDescription::from_string(&cfg.font);
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-        let argv = vec![shell];
-        let pal = Palette::default();
-        let colors: Vec<&gdk::RGBA> = pal.colors.iter().collect();
-
-        let old = vte::Terminal::new();
-        old.set_font(Some(&font));
-        old.set_colors(Some(&pal.fg), Some(&pal.bg), &colors);
-        old.set_hexpand(true);
-        let new = View::default();
-        new.set_font(Some(&font));
-        new.set_colors(Some(&pal.fg), Some(&pal.bg), &colors);
-
-        let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
-        paned.set_wide_handle(true);
-        paned.set_start_child(Some(&old));
-        paned.set_end_child(Some(&new));
-        let win = gtk::ApplicationWindow::new(app);
-        win.set_title(Some("VTE (left) / new view (right)"));
-        win.set_default_size(1400, 700);
-        win.set_child(Some(&paned));
-        win.present();
-
-        // Left: VTE, as termvisor uses it today.
-        match crate::pty::spawn(&argv, &[], &home, 80, 24) {
-            Ok((child, rx)) => {
-                let child = Rc::new(child);
-                let c = child.clone();
-                old.connect_commit(move |_, text, _| c.write(text.as_bytes()));
-                let c = child.clone();
-                let t = old.clone();
-                // VTE has no resize signal here; poll the size.
-                glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
-                    c.resize(t.column_count(), t.row_count());
-                    glib::ControlFlow::Continue
-                });
-                let t = old.clone();
-                glib::spawn_future_local(async move {
-                    while let Ok(crate::pty::Event::Data(d)) = rx.recv().await {
-                        t.feed(&d);
-                    }
-                });
-            }
-            Err(e) => eprintln!("vte side: {e}"),
-        }
-
-        // Right: the new view.
-        match crate::pty::spawn(&argv, &[], &home, new.column_count(), new.row_count()) {
-            Ok((child, rx)) => {
-                let child = Rc::new(child);
-                let c = child.clone();
-                new.connect_commit(move |_, text| c.write(text.as_bytes()));
-                let c = child.clone();
-                new.connect_resized(move |cols, rows| c.resize(cols as i64, rows as i64));
-                child.resize(new.column_count(), new.row_count());
-                let t = new.clone();
-                glib::spawn_future_local(async move {
-                    while let Ok(crate::pty::Event::Data(d)) = rx.recv().await {
-                        t.feed(&d);
-                    }
-                });
-            }
-            Err(e) => eprintln!("new side: {e}"),
-        }
-        new.grab_focus();
-    });
-    app.run_with_args::<&str>(&[])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1086,6 +1334,26 @@ mod tests {
         assert_eq!(key_bytes(gdk::Key::F5, none, mode).as_deref(), Some(&b"\x1b[15~"[..]));
         assert_eq!(key_bytes(gdk::Key::x, gdk::ModifierType::ALT_MASK, mode).as_deref(), Some(&b"\x1bx"[..]));
         assert_eq!(key_bytes(gdk::Key::a, none, mode), None);
+    }
+
+    #[test]
+    fn osc7() {
+        let mut o = Osc7::default();
+        assert_eq!(o.scan(b"ab\x1b]7;file://h/tmp\x07cd"), Some("file://h/tmp".into()));
+        assert_eq!(o.scan(b"\x1b]7;file://h/"), None);
+        assert_eq!(o.scan(b"home\x1b\\"), Some("file://h/home".into()));
+        assert_eq!(o.scan(b"\x1b]"), None);
+        assert_eq!(o.scan(b"7;x\x07"), Some("x".into()));
+        assert_eq!(o.scan(b"\x1b]0;title\x07"), None);
+    }
+
+    #[test]
+    fn mouse() {
+        assert_eq!(mouse_bytes(0, true, 4, 9, true), "\x1b[<0;5;10M");
+        assert_eq!(mouse_bytes(0, false, 4, 9, true), "\x1b[<0;5;10m");
+        assert_eq!(mouse_bytes(64, true, 0, 0, true), "\x1b[<64;1;1M");
+        assert_eq!(mouse_bytes(0, true, 0, 0, false), "\x1b[M !!");
+        assert_eq!(mouse_bytes(2, false, 1, 1, false), "\x1b[M#\"\"");
     }
 
     #[test]

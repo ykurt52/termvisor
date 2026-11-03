@@ -6,7 +6,7 @@ pkgdesc='Multi-protocol terminal and remote access tool'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ykurt52/termvisor'
 license=('GPL-3.0-or-later')
-depends=('gtk4' 'libadwaita' 'vte4' 'libsecret' 'systemd-libs' 'glib2' 'cairo' 'pango' 'openssh')
+depends=('gtk4' 'libadwaita' 'libsecret' 'systemd-libs' 'glib2' 'cairo' 'pango' 'openssh')
 makedepends=('cargo')
 optdepends=('mosh: mosh sessions'
             'android-tools: Android shell, logcat and files'

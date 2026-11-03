@@ -68,7 +68,7 @@ fn fnv(s: &str) -> u64 {
 /// Set after the keyring answered once for this ssh process. A second
 /// prompt means the stored secret was wrong, so we ask the user instead.
 fn marker(id: &str) -> PathBuf {
-    let ppid = std::os::unix::process::parent_id();
+    let ppid = crate::sys::parent_id();
     glib::user_runtime_dir().join("termvisor").join(format!("askpass-{ppid}-{:016x}", fnv(id)))
 }
 

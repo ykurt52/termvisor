@@ -2,7 +2,6 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use gtk::glib;
@@ -113,11 +112,10 @@ impl Settings {
         let path = path();
         let tmp = path.with_extension("json.tmp");
         let text = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
-        let mut f = OpenOptions::new()
+        let mut f = crate::sys::private(&mut OpenOptions::new())
             .write(true)
             .create(true)
             .truncate(true)
-            .mode(0o600)
             .open(&tmp)?;
         f.write_all(text.as_bytes())?;
         f.sync_all()?;

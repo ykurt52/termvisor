@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev libudev-dev \
+            libgtk-4-dev libadwaita-1-dev libsecret-1-dev libudev-dev \
             pkg-config python3 iputils-ping iputils-tracepath xvfb dbus-x11 \
             desktop-file-utils appstream dpkg-dev
 
@@ -61,7 +61,7 @@ jobs:
     container: archlinux:latest
     steps:
       - name: System packages
-        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita vte4 libsecret python iputils
+        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita libsecret python iputils
 
       - uses: actions/checkout@v7
 

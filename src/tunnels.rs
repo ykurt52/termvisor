@@ -17,7 +17,7 @@ use gtk::glib;
 use serde::{Deserialize, Serialize};
 
 use crate::store::write_private;
-use crate::{adb, settings, term};
+use crate::{settings, term};
 
 const VERSION: u32 = 1;
 /// Alive this long counts as up (ssh -N prints nothing when it works).
@@ -222,13 +222,14 @@ fn supervise(prog: String, args: Vec<String>, env: Vec<(String, String)>, reconn
         let waits = [2u64, 5, 10, 30];
         let mut fails = 0usize;
         loop {
-            let spawned = adb::tie(&mut Command::new(&prog))
-                .args(&args)
-                .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn();
+            let spawned = crate::sys::spawn_tied(
+                Command::new(&prog)
+                    .args(&args)
+                    .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped()),
+            );
             let mut ch = match spawned {
                 Ok(ch) => ch,
                 Err(e) => {

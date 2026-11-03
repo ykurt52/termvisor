@@ -10,14 +10,14 @@ use regex::Regex;
 use crate::{pty, streampane};
 
 struct Mark {
-    term: glib::WeakRef<vte::Terminal>,
+    term: glib::WeakRef<crate::vt::View>,
     check: glib::WeakRef<gtk::CheckButton>,
     frame: glib::WeakRef<gtk::Box>,
 }
 
 thread_local! {
     static ON: Cell<bool> = const { Cell::new(false) };
-    static TARGETS: RefCell<Vec<glib::WeakRef<vte::Terminal>>> = const { RefCell::new(Vec::new()) };
+    static TARGETS: RefCell<Vec<glib::WeakRef<crate::vt::View>>> = const { RefCell::new(Vec::new()) };
     static MARKS: RefCell<Vec<Mark>> = const { RefCell::new(Vec::new()) };
     static LISTENERS: RefCell<Vec<Box<dyn Fn()>>> = const { RefCell::new(Vec::new()) };
 }
@@ -62,11 +62,11 @@ pub fn set_on(v: bool) {
     }
 }
 
-pub fn is_target(t: &vte::Terminal) -> bool {
+pub fn is_target(t: &crate::vt::View) -> bool {
     TARGETS.with(|v| v.borrow().iter().any(|w| w.upgrade().as_ref() == Some(t)))
 }
 
-pub fn select(t: &vte::Terminal, pick: bool) {
+pub fn select(t: &crate::vt::View, pick: bool) {
     let was = is_target(t);
     TARGETS.with(|v| {
         let mut v = v.borrow_mut();
@@ -82,7 +82,7 @@ pub fn select(t: &vte::Terminal, pick: bool) {
 
 /// Selects every open pane, or none.
 pub fn select_all(pick: bool) {
-    let all: Vec<vte::Terminal> = MARKS.with(|m| m.borrow().iter().filter_map(|x| x.term.upgrade()).collect());
+    let all: Vec<crate::vt::View> = MARKS.with(|m| m.borrow().iter().filter_map(|x| x.term.upgrade()).collect());
     TARGETS.with(|v| {
         let mut v = v.borrow_mut();
         v.clear();
@@ -94,12 +94,12 @@ pub fn select_all(pick: bool) {
 }
 
 /// Selected panes that are still open.
-pub fn targets() -> Vec<vte::Terminal> {
+pub fn targets() -> Vec<crate::vt::View> {
     TARGETS.with(|v| v.borrow().iter().filter_map(|w| w.upgrade()).collect())
 }
 
 /// Wraps a pane: a checkbox to select it and a red frame when selected.
-pub fn wrap(t: &vte::Terminal, leaf: &gtk::Widget) -> gtk::Overlay {
+pub fn wrap(t: &crate::vt::View, leaf: &gtk::Widget) -> gtk::Overlay {
     let o = gtk::Overlay::new();
     o.set_child(Some(leaf));
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -137,7 +137,7 @@ fn is_reply(text: &str) -> bool {
 
 /// Text typed in `from`: recorded for a macro and copied to the other
 /// selected panes.
-pub fn typed(from: &vte::Terminal, text: &str) {
+pub fn typed(from: &crate::vt::View, text: &str) {
     if is_reply(text) {
         return;
     }
@@ -152,7 +152,7 @@ pub fn typed(from: &vte::Terminal, text: &str) {
 
 /// Sends `text` as if typed: stream panes map Enter to their line ending
 /// and echo; shells get it as is.
-pub fn type_into(t: &vte::Terminal, text: &str) {
+pub fn type_into(t: &crate::vt::View, text: &str) {
     if !streampane::type_text(t, text) {
         pty::send(t, text.as_bytes());
     }
@@ -160,7 +160,7 @@ pub fn type_into(t: &vte::Terminal, text: &str) {
 
 /// Sends raw bytes (command buttons): stream panes write them to the link
 /// unchanged.
-pub fn deliver(t: &vte::Terminal, bytes: &[u8], hex: bool) {
+pub fn deliver(t: &crate::vt::View, bytes: &[u8], hex: bool) {
     if !streampane::write(t, bytes, hex) {
         pty::send(t, bytes);
     }

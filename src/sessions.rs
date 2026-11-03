@@ -271,14 +271,14 @@ fn host_port(s: &str, default: Option<u16>) -> Option<(String, u16)> {
 }
 
 /// Parses quick connect input: `[user@]host[:port]`, `ssh <args>`,
-/// `/dev/<port>[@baud]`, `telnet://host[:port]`, `tcp://host:port`,
+/// `/dev/<port>[@baud]` (`COM<n>[@baud]` on Windows), `telnet://host[:port]`, `tcp://host:port`,
 /// `mosh [user@]host`.
 pub fn quick(input: &str) -> Option<Quick> {
     let s = input.trim();
     if s.is_empty() {
         return None;
     }
-    if s.starts_with("/dev/") {
+    if crate::serial::is_device(s.split_once('@').map_or(s, |(d, _)| d)) {
         let (device, baud) = match s.split_once('@') {
             Some((d, b)) => (d, Some(b.parse().ok().filter(|b| *b > 0)?)),
             None => (s, None),

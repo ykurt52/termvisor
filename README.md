@@ -108,13 +108,13 @@ Packaging details: [docs/packaging.md](docs/packaging.md).
 Dependencies (Debian/Ubuntu):
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev libudev-dev build-essential pkg-config
+sudo apt install libgtk-4-dev libadwaita-1-dev libsecret-1-dev libudev-dev build-essential pkg-config
 ```
 
 Dependencies (Arch):
 
 ```sh
-sudo pacman -S gtk4 libadwaita vte4 libsecret base-devel
+sudo pacman -S gtk4 libadwaita libsecret base-devel
 ```
 
 Optional on both: `mosh` for mosh sessions.

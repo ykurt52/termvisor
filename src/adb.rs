@@ -23,22 +23,10 @@ pub fn bin() -> String {
 
 /// True when `bin` can be run.
 pub fn found(bin: &str) -> bool {
-    if bin.contains('/') {
+    if bin.contains(['/', '\\']) {
         return std::fs::metadata(bin).is_ok_and(|m| m.is_file());
     }
     crate::term::found(bin)
-}
-
-/// Ends the child when termvisor dies, so a crash leaves no adb behind.
-pub fn tie(cmd: &mut Command) -> &mut Command {
-    use std::os::unix::process::CommandExt;
-    // SAFETY: prctl is async-signal-safe.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-            Ok(())
-        })
-    }
 }
 
 /// Device to open; an empty serial means "the only device".
@@ -109,12 +97,9 @@ impl Tracker {
         let (s, c) = (stop.clone(), child.clone());
         thread::spawn(move || {
             while !s.load(Ordering::Acquire) {
-                let spawned = tie(&mut Command::new(&bin))
-                    .args(["track-devices", "-l"])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn();
+                let spawned = crate::sys::spawn_tied(
+                    Command::new(&bin).args(["track-devices", "-l"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()),
+                );
                 let mut ch = match spawned {
                     Ok(ch) => ch,
                     Err(e) => {
