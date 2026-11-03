@@ -14,7 +14,7 @@ it with Pango and turns keys and mouse into input.
 | 3 | Platform layer: ConPTY, Windows Credential Manager, Unix-only parts behind `cfg(unix)` | done, run on Windows |
 | 4 | Windows build in CI, zip with the GTK runtime | done, CI builds the zip |
 | 5 | Installer with upgrade and downgrade guard | done, run on Windows |
-| 6 | Portable single exe, icon and version info in the exe | written, waiting for CI |
+| 6 | Portable single exe, icon and version info in the exe | done, run on Windows |
 
 ## Windows differences
 
