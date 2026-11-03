@@ -757,7 +757,7 @@ pub fn rz_started(data: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::{Child, Command, Stdio};
+    use std::process::{Child, Stdio};
     use std::thread;
 
     fn have(prog: &str) -> bool {
@@ -766,7 +766,7 @@ mod tests {
 
     /// Runs `argv` in `dir` with its stdin/stdout as our wire.
     fn peer(argv: &[&str], dir: &Path) -> (ChanWire, Child) {
-        let mut child = Command::new(argv[0])
+        let mut child = crate::sys::command(argv[0])
             .args(&argv[1..])
             .current_dir(dir)
             .stdin(Stdio::piped())
@@ -829,7 +829,7 @@ mod tests {
         let b = master.try_clone_native().expect("clone").into_raw_fd();
         // SAFETY: a and b are fresh descriptors owned by nothing else.
         let (inp, out) = unsafe { (OwnedFd::from_raw_fd(a), OwnedFd::from_raw_fd(b)) };
-        let mut child = Command::new("sz")
+        let mut child = crate::sys::command("sz")
             .args(["-q", "fw.bin"])
             .current_dir(&dir)
             .stdin(Stdio::from(inp))

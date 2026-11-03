@@ -148,8 +148,10 @@ never change it. The Windows runner image has Inno Setup.
 | `termvisor-windows-x64_v<version>.zip` | the bundle folder |
 | `termvisor-windows-x64_v<version>_setup.exe` | the installer |
 
-CI uploads both as the `termvisor-windows-x64_v<version>` artifact on
-every push; a `v*` tag attaches both to the release.
+CI uploads each as its own artifact on every push
+(`termvisor-windows-x64_v<version>_setup` and
+`termvisor-windows-x64_v<version>`); a `v*` tag attaches both files to
+the release.
 
 The Windows code paths are type-checked on Linux too, see
 [windows.md](windows.md).

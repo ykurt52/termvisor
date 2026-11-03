@@ -13,7 +13,7 @@ it with Pango and turns keys and mouse into input.
 | 2 | Replace `vte::Terminal` everywhere with the view; VTE dropped | done |
 | 3 | Platform layer: ConPTY, Windows Credential Manager, Unix-only parts behind `cfg(unix)` | done, run on Windows |
 | 4 | Windows build in CI, zip with the GTK runtime | done, CI builds the zip |
-| 5 | Installer with upgrade and downgrade guard | written, waiting for CI |
+| 5 | Installer with upgrade and downgrade guard | done, run on Windows |
 
 ## Windows differences
 
@@ -28,6 +28,7 @@ it with Pango and turns keys and mouse into input.
 | Traceroute | `tracepath -n` | `tracert -d` |
 | Server URLs | all IPv4 addresses | main address and loopback |
 | Child cleanup | `PR_SET_PDEATHSIG` | job object that ends its processes when termvisor exits |
+| Background programs (adb, ssh for tunnels and SFTP, tracert) | plain child | `sys::command` adds `CREATE_NO_WINDOW`, so no console window opens |
 | USB capture | usbmon | not available (page hidden) |
 | Release All | other instances and their ports | locks and sockets only |
 | mosh | yes | no mosh client on Windows |

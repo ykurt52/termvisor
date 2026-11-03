@@ -98,7 +98,7 @@ impl Tracker {
         thread::spawn(move || {
             while !s.load(Ordering::Acquire) {
                 let spawned = crate::sys::spawn_tied(
-                    Command::new(&bin).args(["track-devices", "-l"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()),
+                    crate::sys::command(&bin).args(["track-devices", "-l"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()),
                 );
                 let mut ch = match spawned {
                     Ok(ch) => ch,
@@ -195,7 +195,7 @@ impl Adb {
     }
 
     fn command(&self, verb: &str, line: &str) -> Command {
-        let mut c = Command::new(&self.bin);
+        let mut c = crate::sys::command(&self.bin);
         c.args(select(&self.serial)).arg(verb).arg(line);
         c
     }
@@ -237,7 +237,7 @@ impl Adb {
 
     /// Clears the device log buffers (`logcat -c`).
     pub fn clear_log(&self) -> Result<(), String> {
-        let mut c = Command::new(&self.bin);
+        let mut c = crate::sys::command(&self.bin);
         c.args(select(&self.serial)).args(["logcat", "-c"]);
         let out = c.output().map_err(|e| self.spawn_err(e))?;
         if out.status.success() {

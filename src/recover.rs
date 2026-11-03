@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 #[cfg(unix)]
 use std::thread;
 #[cfg(unix)]
@@ -187,7 +187,7 @@ fn live(sock: &Path) -> bool {
 
 /// Asks the ssh master behind `sock` to exit.
 fn exit_master(sock: &Path) -> bool {
-    Command::new("ssh")
+    crate::sys::command("ssh")
         .arg("-o")
         .arg(format!("ControlPath={}", sock.display()))
         .args(["-O", "exit", "termvisor-release"])
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn stops_a_child_process() {
-        let mut child = Command::new("sleep").arg("30").spawn().expect("spawn");
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().expect("spawn");
         let pid = child.id();
         // Reap in the background so the pid disappears from /proc.
         let reaper = thread::spawn(move || child.wait());

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
@@ -223,7 +223,7 @@ fn supervise(prog: String, args: Vec<String>, env: Vec<(String, String)>, reconn
         let mut fails = 0usize;
         loop {
             let spawned = crate::sys::spawn_tied(
-                Command::new(&prog)
+                crate::sys::command(&prog)
                     .args(&args)
                     .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
                     .stdin(Stdio::null())

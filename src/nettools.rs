@@ -3,7 +3,7 @@
 
 use std::io::{BufRead, BufReader, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -210,7 +210,7 @@ pub fn parse_ping(line: &str) -> Ping {
 /// Runs `prog args` with C locale; each output line goes through `parse`.
 fn lines<T: Send + 'static>(prog: &str, args: &[String], parse: fn(&str) -> T, end: T, stop: Arc<AtomicBool>, tx: async_channel::Sender<T>) -> Result<(), String> {
     let mut ch = crate::sys::spawn_tied(
-        Command::new(prog).args(args).env("LC_ALL", "C").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()),
+        crate::sys::command(prog).args(args).env("LC_ALL", "C").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()),
     )
     .map_err(|e| format!("{prog}: {e}"))?;
     let out = ch.stdout.take();

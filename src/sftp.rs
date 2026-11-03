@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 const INIT: u8 = 1;
 const VERSION: u8 = 2;
@@ -233,7 +233,7 @@ impl Sftp {
     /// speaks SFTP over its stdin/stdout.
     pub fn spawn(argv: &[String], env: &[(String, String)]) -> Result<Self, String> {
         let (prog, args) = argv.split_first().ok_or("empty command")?;
-        let mut child = Command::new(prog)
+        let mut child = crate::sys::command(prog)
             .args(args)
             .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())

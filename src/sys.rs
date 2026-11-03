@@ -78,6 +78,19 @@ pub fn parent_id() -> u32 {
     }
 }
 
+/// Command for a child without a terminal of its own (adb, ssh for tunnels
+/// and SFTP, ping). On Windows it runs without a console window.
+pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// Starts `cmd` so that it ends when termvisor ends, even after a crash.
 pub fn spawn_tied(cmd: &mut Command) -> io::Result<Child> {
     #[cfg(target_os = "linux")]

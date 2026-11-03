@@ -5,7 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -287,7 +287,7 @@ fn reader(bin: String, serial: String, last: Arc<Mutex<Option<String>>>, child: 
             if let Some(ts) = last.lock().ok().and_then(|g| g.clone()) {
                 args.extend(["-T".into(), ts]);
             }
-            let spawned = crate::sys::spawn_tied(Command::new(&bin).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()));
+            let spawned = crate::sys::spawn_tied(crate::sys::command(&bin).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()));
             let mut ch = match spawned {
                 Ok(ch) => ch,
                 Err(e) => {

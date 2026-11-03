@@ -110,9 +110,15 @@ jobs:
         shell: pwsh
         run: packaging/windows/setup.ps1 $env:VERSION dist/termvisor dist
 
+      # One artifact per file, so each downloads on its own.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: termvisor-windows-x64_v${{ env.VERSION }}_setup
+          path: dist/termvisor-windows-x64_v*_setup.exe
+          compression-level: 0
+
       - uses: actions/upload-artifact@v7
         with:
           name: termvisor-windows-x64_v${{ env.VERSION }}
-          path: |
-            dist/termvisor-windows-x64_v*.zip
-            dist/termvisor-windows-x64_v*_setup.exe
+          path: dist/termvisor-windows-x64_v*.zip
+          compression-level: 0
