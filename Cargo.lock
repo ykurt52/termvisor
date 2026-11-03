@@ -1442,6 +1442,7 @@ dependencies = [
  "libc",
  "libsecret",
  "mavlink",
+ "native-tls",
  "regex",
  "serde",
  "serde_json",

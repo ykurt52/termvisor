@@ -24,6 +24,7 @@ mavlink = { version = "0.21", default-features = false, features = ["std", "dial
 suppaftp = { version = "12", features = ["native-tls"] }
 zmodem2 = "0.7"
 alacritty_terminal = "0.26"
+native-tls = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 libsecret = "0.9"

@@ -192,7 +192,7 @@ Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termv
 
 | Path | Content |
 |---|---|
-| `~/.config/termvisor/settings.json` | Theme, font, scrollback, restore tabs, renderer, pane output defaults |
+| `~/.config/termvisor/settings.json` | Theme, font, scrollback, restore tabs, renderer, pane output defaults, update check |
 | `~/.config/termvisor/sessions.toml` | Saved sessions, see [docs/sessions.md](docs/sessions.md) |
 | `~/.config/termvisor/commands.toml` | Command panel pages, see [docs/commands.md](docs/commands.md) |
 | `~/.config/termvisor/highlight.toml` | Highlight rules, see [docs/output.md](docs/output.md) |

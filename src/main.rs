@@ -66,6 +66,7 @@ mod toolpane;
 mod toolspage;
 mod tunnelpage;
 mod tunnels;
+mod update;
 mod watchdog;
 mod welcome;
 mod window;

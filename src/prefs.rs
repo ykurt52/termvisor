@@ -312,6 +312,7 @@ fn panes(state: &Rc<State>, dlg: &adw::PreferencesDialog, host: &gtk::Widget) ->
     let restore = switch("Restore Tabs on Start", "", cfg.restore_tabs);
     let right = switch("Panel on Right", "Commands, transfers and log beside the tabs", cfg.dock_right);
     let fkeys = switch("F1–F12 Send Command Buttons", "Off by default: full-screen programs use these keys", cfg.command_keys);
+    let updates = switch("Check for Updates", "Once a day, asks GitHub for the latest release", cfg.update_check);
     let st = state.clone();
     restore.connect_active_notify(move |r| st.set_restore(r.is_active()));
     // Through the window action, so the window moves its panel.
@@ -328,7 +329,12 @@ fn panes(state: &Rc<State>, dlg: &adw::PreferencesDialog, host: &gtk::Widget) ->
         st.edit_cfg(|c| c.command_keys = on);
         st.commands_changed();
     });
-    for w in [restore.upcast_ref::<gtk::Widget>(), right.upcast_ref(), fkeys.upcast_ref()] {
+    let st = state.clone();
+    updates.connect_active_notify(move |r| {
+        let on = r.is_active();
+        st.edit_cfg(|c| c.update_check = on);
+    });
+    for w in [restore.upcast_ref::<gtk::Widget>(), right.upcast_ref(), fkeys.upcast_ref(), updates.upcast_ref()] {
         win.add(w);
     }
     page.add(&win);

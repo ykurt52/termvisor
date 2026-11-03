@@ -579,9 +579,41 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
     if let Some(msg) = state.notice.take() {
         ui.toast(&msg);
     }
+    if primary {
+        check_update(&ui);
+    }
     ui.refresh_status();
     win.present();
     view
+}
+
+/// Offers a newer release in a toast that stays until dismissed; a
+/// dismissed release is not offered again.
+fn check_update(ui: &Ui) {
+    let cfg = ui.state.cfg.borrow();
+    if !cfg.update_check || !crate::update::due(cfg.update_last, crate::update::now()) {
+        return;
+    }
+    drop(cfg);
+    let st = ui.state.clone();
+    let checked = move || st.edit_cfg(|c| c.update_last = crate::update::now());
+    let (st, toasts, win) = (ui.state.clone(), ui.toasts.downgrade(), ui.win.downgrade());
+    crate::update::check(checked, move |r| {
+        let Some(toasts) = toasts.upgrade() else { return };
+        if st.cfg.borrow().update_skip == r.version {
+            return;
+        }
+        let toast = adw::Toast::new(&format!("termvisor {} is available", r.version));
+        toast.set_timeout(0);
+        toast.set_button_label(Some("Download"));
+        let url = r.url;
+        toast.connect_button_clicked(move |_| {
+            gtk::UriLauncher::new(&url).launch(win.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
+        });
+        let version = r.version;
+        toast.connect_dismissed(move |_| st.edit_cfg(|c| c.update_skip = version.clone()));
+        toasts.add_toast(toast);
+    });
 }
 
 fn fill_themes(menu: &gio::Menu, state: &State) {
