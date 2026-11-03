@@ -1,6 +1,6 @@
 pkgbase = termvisor
 	pkgdesc = Multi-protocol terminal and remote access tool
-	pkgver = 0.1.0
+	pkgver = 1.0.1
 	pkgrel = 1
 	url = https://github.com/ykurt52/termvisor
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = termvisor
 	optdepends = mosh: mosh sessions
 	optdepends = android-tools: Android shell, logcat and files
 	optdepends = iputils: ping and tracepath tools
-	source = termvisor-0.1.0.tar.gz::https://github.com/ykurt52/termvisor/archive/v0.1.0.tar.gz
+	source = termvisor-1.0.1.tar.gz::https://github.com/ykurt52/termvisor/archive/v1.0.1.tar.gz
 	sha256sums = SKIP
 
 pkgname = termvisor

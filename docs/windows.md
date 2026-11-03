@@ -10,9 +10,9 @@ it with Pango and turns keys and mouse into input.
 | Phase | Work | State |
 |---|---|---|
 | 1 | Terminal view, compared with VTE side by side | done |
-| 2 | Replace `vte::Terminal` everywhere with the view; VTE dropped | done, to be tested |
-| 3 | Platform layer: ConPTY, Windows Credential Manager, Unix-only parts behind `cfg(unix)` | done, type-checked, not run on Windows yet |
-| 4 | Windows build in CI, zip with the GTK runtime | written, waiting for the first CI run |
+| 2 | Replace `vte::Terminal` everywhere with the view; VTE dropped | done |
+| 3 | Platform layer: ConPTY, Windows Credential Manager, Unix-only parts behind `cfg(unix)` | done, run on Windows |
+| 4 | Windows build in CI, zip with the GTK runtime | done, CI builds the zip |
 
 ## Windows differences
 

@@ -26,7 +26,7 @@ dependencies are found by `dpkg-shlibdeps`; it also depends on
 suggests `mosh` and `adb`. Install with:
 
 ```bash
-sudo apt install ./target/debian/termvisor_0.1.0-1_amd64.deb
+sudo apt install ./target/debian/termvisor_1.0.1-1_amd64.deb
 ```
 
 It installs `/usr/bin/termvisor`, the desktop file, the metainfo, the icon
@@ -126,7 +126,7 @@ The Windows code paths are type-checked on Linux too, see
 
 ```bash
 cd packaging/arch
-updpkgsums          # after the v0.1.0 tag exists: real checksum instead of SKIP
+updpkgsums          # after the release tag exists: real checksum instead of SKIP
 makepkg --printsrcinfo > .SRCINFO
 makepkg -si         # build and install locally to try it
 ```
@@ -151,7 +151,8 @@ on pull requests and by hand. It has three jobs:
 1. Set `version` in `Cargo.toml`, add a `<release>` to
    `data/io.github.ykurt52.termvisor.metainfo.xml`, set `pkgver` in the
    PKGBUILD.
-2. Commit, then tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+2. Commit, then tag and push: `git tag v1.0.1 && git push origin refs/tags/v1.0.1`
+   (full ref, since the `v1.0.1` branch has the same name).
 3. `release.yml` checks that the tag matches `Cargo.toml`, builds the
    `.deb` and creates the GitHub release with it, adds the Windows zip,
    then `apt.yml` publishes the APT repository.

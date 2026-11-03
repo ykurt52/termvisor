@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag like v0.1.0 builds the .deb and the Windows zip and
+# Pushing a tag like v1.0.1 builds the .deb and the Windows zip and
 # attaches them to a GitHub release with that name (the source tarball is
 # added by GitHub).
 on:
