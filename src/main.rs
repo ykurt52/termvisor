@@ -50,6 +50,7 @@ mod usb;
 mod usbdecode;
 mod usbpage;
 mod usbpane;
+mod vt;
 mod tftp;
 mod toolpane;
 mod toolspage;
@@ -90,6 +91,7 @@ fn main() -> glib::ExitCode {
                 }
             };
         }
+        Some("--vt-demo") => return vt::demo(),
         Some("--release-all") => return glib::ExitCode::from(u8::try_from(recover::cli()).unwrap_or(1)),
         Some(watchdog::FLAG) => {
             return match args.get(2).and_then(|p| p.parse::<u32>().ok()) {

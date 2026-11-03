@@ -25,6 +25,7 @@ regex = "1"
 mavlink = { version = "0.21", default-features = false, features = ["std", "dialect-common", "mav2-message-extensions"] }
 suppaftp = { version = "12", features = ["native-tls"] }
 zmodem2 = "0.7"
+alacritty_terminal = "0.26"
 
 [build-dependencies]
 glib-build-tools = "0.22"
