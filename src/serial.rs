@@ -12,6 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use serialport::SerialPort;
 
 use crate::link::{Event, StreamOpts};
@@ -110,7 +111,7 @@ fn is_com(name: &str) -> bool {
 #[cfg(unix)]
 type Port = serialport::TTYPort;
 #[cfg(windows)]
-type Port = serialport::COMPort;
+type Port = crate::comport::ComPort;
 
 pub struct PortInfo {
     pub path: String,
@@ -313,26 +314,7 @@ impl Drop for Conn {
 pub fn open(cfg: &SerialCfg) -> Result<(Conn, async_channel::Receiver<Event>), String> {
     cfg.check()?;
     let lock = lock(Path::new(LOCK_DIR), &cfg.device)?;
-    let opened = serialport::new(&cfg.device, cfg.baud)
-        .data_bits(match cfg.data_bits {
-            5 => serialport::DataBits::Five,
-            6 => serialport::DataBits::Six,
-            7 => serialport::DataBits::Seven,
-            _ => serialport::DataBits::Eight,
-        })
-        .parity(match cfg.parity {
-            Parity::None => serialport::Parity::None,
-            Parity::Odd => serialport::Parity::Odd,
-            Parity::Even => serialport::Parity::Even,
-        })
-        .stop_bits(if cfg.stop_bits == 2 { serialport::StopBits::Two } else { serialport::StopBits::One })
-        .flow_control(match cfg.flow {
-            Flow::None => serialport::FlowControl::None,
-            Flow::Software => serialport::FlowControl::Software,
-            Flow::Hardware => serialport::FlowControl::Hardware,
-        })
-        .timeout(Duration::from_millis(100))
-        .open_native();
+    let opened = open_port(cfg);
     let port = match opened {
         Ok(p) => p,
         Err(e) => {
@@ -360,6 +342,36 @@ pub fn open(cfg: &SerialCfg) -> Result<(Conn, async_channel::Receiver<Event>), S
         .map_err(|e| e.to_string())?;
 
     Ok((Conn { cmds: cmd_tx, stop, lock }, ev_rx))
+}
+
+/// Overlapped I/O, so the reader and writer threads do not block each other.
+#[cfg(windows)]
+fn open_port(cfg: &SerialCfg) -> Result<Port, serialport::Error> {
+    crate::comport::open(cfg, Duration::from_millis(100))
+}
+
+#[cfg(unix)]
+fn open_port(cfg: &SerialCfg) -> Result<Port, serialport::Error> {
+    serialport::new(&cfg.device, cfg.baud)
+        .data_bits(match cfg.data_bits {
+            5 => serialport::DataBits::Five,
+            6 => serialport::DataBits::Six,
+            7 => serialport::DataBits::Seven,
+            _ => serialport::DataBits::Eight,
+        })
+        .parity(match cfg.parity {
+            Parity::None => serialport::Parity::None,
+            Parity::Odd => serialport::Parity::Odd,
+            Parity::Even => serialport::Parity::Even,
+        })
+        .stop_bits(if cfg.stop_bits == 2 { serialport::StopBits::Two } else { serialport::StopBits::One })
+        .flow_control(match cfg.flow {
+            Flow::None => serialport::FlowControl::None,
+            Flow::Software => serialport::FlowControl::Software,
+            Flow::Hardware => serialport::FlowControl::Hardware,
+        })
+        .timeout(Duration::from_millis(100))
+        .open_native()
 }
 
 fn read_loop(mut port: Port, tx: async_channel::Sender<Event>, stop: Arc<AtomicBool>) {

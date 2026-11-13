@@ -19,7 +19,7 @@ Working name. Final name pending a trademark check.
 | Terminal | Own GTK view on `alacritty_terminal` (`src/vt.rs`) | Truecolor, runs on Linux and Windows |
 | SSH | System OpenSSH + ControlMaster | Reuses `~/.ssh/config`, agent, ProxyJump, FIDO |
 | SFTP | SFTP subsystem over the master socket | No second login |
-| Serial | `serialport` crate | Fed into the terminal view via `feed()` |
+| Serial | `serialport` crate; own overlapped COM backend on Windows (`src/comport.rs`) | Fed into the terminal view via `feed()`; synchronous COM handles serialize the reader and writer threads |
 | FTP/FTPS | `suppaftp` | TLS support |
 
 Minimum runtime: GTK 4.14, libadwaita 1.5 (Ubuntu 24.04 / Mint 22 baseline).

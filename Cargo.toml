@@ -1,6 +1,6 @@
 [package]
 name = "termvisor"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 rust-version = "1.92"
 license = "GPL-3.0-or-later"
@@ -31,13 +31,16 @@ libsecret = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
+    "Win32_Devices_Communication",
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_Security_Credentials",
+    "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
     "Win32_System_JobObjects",
     "Win32_System_Pipes",
     "Win32_System_Threading",

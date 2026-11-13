@@ -15,21 +15,15 @@ Everything is also plain text in `~/.config/termvisor/`.
 
 ## Update check
 
-On start the main window asks GitHub once a day for the latest release
+On every start the main window asks GitHub for the latest release
 (`api.github.com/repos/ykurt52/termvisor/releases/latest`, one HTTPS
 request). When it is newer than the running version, a toast says
 "termvisor X.Y.Z is available"; Download opens the release page. Closing
-the toast skips that version until a newer one comes out. Network errors
-only go to the log.
+the toast hides it until the next start. Network errors only go to the
+log.
 
-Turn it off with Preferences → Panes → Check for Updates. Stored in
-`settings.json`:
-
-| Key | Meaning |
-|---|---|
-| `update_check` | on or off (default on) |
-| `update_last` | Unix time of the last answer |
-| `update_skip` | version the user closed |
+Turn it off with Preferences → Panes → Check for Updates
+(`update_check` in `settings.json`, on by default).
 
 ## Shortcuts
 

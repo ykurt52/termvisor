@@ -85,6 +85,9 @@ struct Pane {
     view: Cell<View>,
     echo_on: Cell<bool>,
     eol: Cell<Eol>,
+    /// Modem line levels applied on every serial connect.
+    dtr_on: Cell<bool>,
+    rts_on: Cell<bool>,
     mirror: bool,
     dot: gtk::Label,
     stats: gtk::Label,
@@ -270,6 +273,9 @@ fn connect(p: &Rc<Pane>) {
     match open_link(&p.src) {
         Ok((link, rx)) => {
             let serial = matches!(link, Link::Serial(_));
+            // Windows opens with DTR and RTS low; Linux raises both. Apply the toolbar state.
+            link.dtr(p.dtr_on.get());
+            link.rts(p.rts_on.get());
             p.link.replace(Some(link));
             if serial {
                 p.set_up(true);
@@ -766,6 +772,8 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
         view: Cell::new(opts.view()),
         echo_on: Cell::new(opts.echo),
         eol: Cell::new(opts.eol),
+        dtr_on: Cell::new(true),
+        rts_on: Cell::new(true),
         src,
         link: RefCell::new(None),
         hex: RefCell::new(Hex::default()),
@@ -798,8 +806,8 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
     let echo = toggle("Echo", "Local echo of typed text", p.echo_on.get());
     let eols: Vec<&str> = Eol::ALL.iter().map(|e| e.label()).collect();
     let eol = dropdown(&eols, "Bytes sent for Enter", Eol::ALL.iter().position(|e| *e == p.eol.get()).unwrap_or(0));
-    let dtr = toggle("DTR", "DTR line level", true);
-    let rts = toggle("RTS", "RTS line level", true);
+    let dtr = toggle("DTR", "DTR line level", p.dtr_on.get());
+    let rts = toggle("RTS", "RTS line level", p.rts_on.get());
     let brk = gtk::Button::with_label("Break");
     brk.add_css_class("flat");
     brk.set_tooltip_text(Some(if serial { "Send a 250 ms break" } else { "Send telnet BREAK" }));
@@ -859,12 +867,14 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
     });
     let pp = p.clone();
     dtr.connect_toggled(move |b| {
+        pp.dtr_on.set(b.is_active());
         if let Some(l) = pp.link.borrow().as_ref() {
             l.dtr(b.is_active());
         }
     });
     let pp = p.clone();
     rts.connect_toggled(move |b| {
+        pp.rts_on.set(b.is_active());
         if let Some(l) = pp.link.borrow().as_ref() {
             l.rts(b.is_active());
         }

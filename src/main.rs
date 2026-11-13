@@ -8,6 +8,8 @@ mod askpass;
 mod cmdpanel;
 mod commands;
 #[cfg(windows)]
+mod comport;
+#[cfg(windows)]
 mod conpty;
 mod devices;
 mod dock;

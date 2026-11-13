@@ -22,7 +22,7 @@ it with Pango and turns keys and mouse into input.
 |---|---|---|
 | Programs in a pane | own pty (`pty.rs`) | pseudo console (`conpty.rs`), Windows 10 1809 or newer |
 | Local shell | `$SHELL` | `pwsh.exe` if installed, else `powershell.exe` |
-| Serial ports | `/dev/tty*`, UUCP locks | `COM<n>` (quick connect `COM3@115200`); Windows opens ports exclusively |
+| Serial ports | `/dev/tty*`, UUCP locks | `COM<n>` (quick connect `COM3@115200`); Windows opens ports exclusively. Own overlapped backend (`src/comport.rs`): synchronous handles made the reader and writer threads wait for each other (up to ~500 ms per keystroke). DTR and RTS are set from the toolbar on every connect, since Windows opens with both low |
 | Saved passwords | Secret Service (libsecret) | Credential Manager, entries `termvisor:<id>` |
 | SSH | system `ssh`, shared connections (ControlMaster) | Windows OpenSSH `ssh.exe`, no shared connections |
 | Ping | `ping` program | ICMP API (the program's output depends on the system language) |

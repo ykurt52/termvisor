@@ -1,31 +1,20 @@
 // Update check: asks GitHub for the latest release and tells the caller
-// when it is newer than this build. At most once a day, silent on errors.
+// when it is newer than this build. Runs on every start, silent on errors.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use gtk::glib;
 
 const HOST: &str = "api.github.com";
 const PATH: &str = "/repos/ykurt52/termvisor/releases/latest";
-const DAY: i64 = 24 * 60 * 60;
 
 pub struct Release {
     /// Version without the leading "v", e.g. "1.0.2".
     pub version: String,
     /// Release page.
     pub url: String,
-}
-
-/// Seconds since the Unix epoch.
-pub fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
-}
-
-/// True when the last check was a day or more ago (or in the future).
-pub fn due(last: i64, now: i64) -> bool {
-    now - last >= DAY || now < last
 }
 
 /// Major, minor and patch of "v1.2.3", "1.2" or "1.2.3-rc1".
@@ -84,8 +73,8 @@ fn fetch() -> Result<Release, String> {
 }
 
 /// Checks in the background; `found` runs on the GTK thread with a release
-/// newer than this build. `checked` runs after any answer from GitHub.
-pub fn check(checked: impl FnOnce() + 'static, found: impl FnOnce(Release) + 'static) {
+/// newer than this build.
+pub fn check(found: impl FnOnce(Release) + 'static) {
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let _ = tx.send_blocking(fetch());
@@ -93,7 +82,6 @@ pub fn check(checked: impl FnOnce() + 'static, found: impl FnOnce(Release) + 'st
     glib::spawn_future_local(async move {
         match rx.recv().await {
             Ok(Ok(r)) => {
-                checked();
                 if newer(&r.version, env!("CARGO_PKG_VERSION")) {
                     found(r);
                 }
@@ -117,13 +105,6 @@ mod tests {
         assert!(!newer("1.0.0", "1.0.1"));
         assert!(!newer("1.0.2-rc1", "1.0.2"));
         assert!(!newer("garbage", "1.0.1"));
-    }
-
-    #[test]
-    fn schedule() {
-        assert!(due(0, DAY));
-        assert!(!due(100, 100 + DAY - 1));
-        assert!(due(100 + DAY, 100));
     }
 
     #[test]

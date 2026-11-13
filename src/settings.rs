@@ -38,12 +38,8 @@ pub struct Settings {
     pub theme_dark: String,
     /// Themes for panes whose title or target matches.
     pub theme_rules: Vec<ThemeRule>,
-    /// Look for a newer release once a day.
+    /// Look for a newer release on every start.
     pub update_check: bool,
-    /// Unix time of the last answer from the update check.
-    pub update_last: i64,
-    /// Release the user dismissed; not offered again.
-    pub update_skip: String,
 }
 
 /// Theme for panes matching comma separated globs, e.g. "root@prod*".
@@ -84,8 +80,6 @@ impl Default for Settings {
             theme_dark: "Dark".into(),
             theme_rules: Vec::new(),
             update_check: true,
-            update_last: 0,
-            update_skip: String::new(),
         }
     }
 }
