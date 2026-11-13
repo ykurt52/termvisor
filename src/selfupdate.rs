@@ -51,6 +51,48 @@ impl Install {
     }
 }
 
+/// Removes folders of other portable builds next to the running one, in
+/// the background a little after start. Only when this exe runs from
+/// `…\termvisor\portable\<build>\`, so nothing else is ever touched.
+pub fn clean_portable_later() {
+    if std::env::var_os(PORTABLE_ENV).is_none() {
+        return;
+    }
+    let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) else { return };
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        if let Some((root, keep)) = portable_root(&dir) {
+            clean_portable(&root, &keep);
+        }
+    });
+}
+
+/// Root and build folder name when `dir` is `…/termvisor/portable/<build>`.
+fn portable_root(dir: &Path) -> Option<(PathBuf, String)> {
+    let keep = dir.file_name()?.to_str()?.to_string();
+    let root = dir.parent()?;
+    let named = |p: &Path, n: &str| p.file_name().is_some_and(|f| f.eq_ignore_ascii_case(n));
+    (named(root, "portable") && root.parent().is_some_and(|t| named(t, "termvisor"))).then(|| (root.to_path_buf(), keep))
+}
+
+/// Removes build folders under `root` other than `keep`. One still in use
+/// cannot be renamed on Windows, so it is left for a later start; folders
+/// being unpacked (`.tmp`) are never touched.
+fn clean_portable(root: &Path, keep: &str) {
+    let Ok(entries) = fs::read_dir(root) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name == keep || name.contains(".tmp") || !e.path().is_dir() {
+            continue;
+        }
+        let old = root.join(format!("{name}.old"));
+        if name.ends_with(".old") || fs::rename(e.path(), &old).is_ok() {
+            let path = if name.ends_with(".old") { e.path() } else { old };
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
 /// Release file this install updates from; None when it cannot update itself.
 pub fn asset<'a>(install: &Install, release: &'a Release) -> Option<&'a Asset> {
     let suffix = match install {
@@ -148,6 +190,27 @@ mod tests {
         assert_eq!(target(&Install::Portable(named), a).unwrap(), dir.join(&a.name));
         let renamed = dir.join("termvisor.exe");
         assert_eq!(target(&Install::Portable(renamed), a).unwrap(), dir.join("termvisor.new"));
+    }
+
+    #[test]
+    fn portable_cleanup() {
+        let base = std::env::temp_dir().join(format!("termvisor-clean-{}", std::process::id()));
+        let root = base.join("termvisor").join("portable");
+        for d in ["1.0.5-aa", "1.0.6-bb", "1.0.6-cc.tmp99", "1.0.4-dd.old"] {
+            fs::create_dir_all(root.join(d).join("lib")).unwrap();
+            fs::write(root.join(d).join("lib/x.dll"), "x").unwrap();
+        }
+        fs::write(root.join("note.txt"), "keep").unwrap();
+        let (r, keep) = portable_root(&root.join("1.0.6-bb")).unwrap();
+        assert_eq!((r.as_path(), keep.as_str()), (root.as_path(), "1.0.6-bb"));
+        clean_portable(&r, &keep);
+        let mut left: Vec<String> = fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["1.0.6-bb", "1.0.6-cc.tmp99", "note.txt"]);
+        // Anywhere else: no root, nothing removed.
+        assert!(portable_root(&base.join("other").join("1.0.6-bb")).is_none());
+        assert!(portable_root(&root).is_none());
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

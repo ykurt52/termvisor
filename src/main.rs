@@ -139,6 +139,7 @@ fn main() -> glib::ExitCode {
         }
         keybindings::apply(app, &keybindings::load());
         watchdog::start();
+        selfupdate::clean_portable_later();
     });
 
     let state: Rc<OnceCell<Rc<State>>> = Rc::new(OnceCell::new());

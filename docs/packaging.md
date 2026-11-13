@@ -134,9 +134,12 @@ packaging/windows/portable.sh dist/termvisor dist/termvisor-windows-x64_v1.0.3_p
 The launcher is one exe of about 25 MB. On start it unpacks the bundle
 into `%LOCALAPPDATA%\termvisor\portable\<version>-<build>\` unless that
 folder is already there, starts `termvisor.exe` from it with the same
-arguments and exits. The first start takes a second or two, later starts
-are instant. Folders of other builds are removed once nothing runs from
-them. Settings and sessions are in the same place as with the installer.
+arguments and exits at once (a launcher that stayed to clean up kept the
+new window from being resized until it ended). The first start takes a
+second or two, later starts are instant. termvisor removes the folders of
+other builds in the background 10 s after start, only when it runs from
+that portable folder, and skips any folder still in use. Settings and
+sessions are in the same place as with the installer.
 
 The launcher takes its version from termvisor's `Cargo.toml`. Its tests
 run on Linux: `cargo test --manifest-path packaging/windows/portable/Cargo.toml`.

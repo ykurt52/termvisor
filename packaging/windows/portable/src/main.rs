@@ -1,7 +1,7 @@
 // Portable termvisor: unpacks the embedded bundle once into
 // %LOCALAPPDATA%\termvisor\portable\<version>-<build> and starts
-// termvisor.exe from there. Later starts reuse the folder; folders of
-// other builds are removed when nothing runs from them.
+// termvisor.exe from there, then exits at once. Later starts reuse the
+// folder; termvisor removes the folders of other builds itself.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -32,7 +32,8 @@ fn run() -> Result<(), String> {
         .env("TERMVISOR_PORTABLE", me)
         .spawn()
         .map_err(|e| format!("{}: {e}", dir.join(EXE).display()))?;
-    clean(&root, ID);
+    // Exit now: Windows shows the "starting" cursor while this runs, and
+    // the new window cannot be resized until it is gone.
     Ok(())
 }
 
@@ -68,23 +69,6 @@ fn prepare(root: &Path, id: &str, bundle: &[u8]) -> io::Result<PathBuf> {
         }
     }
     Ok(dir)
-}
-
-/// Removes folders of other builds. A folder still in use cannot be renamed
-/// on Windows, so it is left alone and goes on a later start.
-fn clean(root: &Path, keep: &str) {
-    let Ok(entries) = fs::read_dir(root) else { return };
-    for e in entries.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if name == keep || name.contains(".tmp") || !e.path().is_dir() {
-            continue;
-        }
-        let old = root.join(format!("{name}.old"));
-        if name.ends_with(".old") || fs::rename(e.path(), &old).is_ok() {
-            let path = if name.ends_with(".old") { e.path() } else { old };
-            let _ = fs::remove_dir_all(path);
-        }
-    }
 }
 
 #[cfg(windows)]
@@ -148,19 +132,5 @@ mod tests {
         // Nothing half done is left behind.
         assert_eq!(fs::read_dir(&root).map(|d| d.count()).unwrap_or(0), 0);
         let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn cleans_other_builds() {
-        let root = scratch("clean");
-        let b = bundle(&[(EXE, b"exe")]);
-        prepare(&root, "1.0.2-aa", &b).unwrap();
-        prepare(&root, "1.0.3-bb", &b).unwrap();
-        fs::create_dir_all(root.join("1.0.3-cc.tmp99")).unwrap();
-        clean(&root, "1.0.3-bb");
-        let mut left: Vec<_> = fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
-        left.sort();
-        assert_eq!(left, ["1.0.3-bb", "1.0.3-cc.tmp99"]);
-        fs::remove_dir_all(&root).unwrap();
     }
 }
