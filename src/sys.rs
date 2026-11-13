@@ -115,45 +115,6 @@ pub fn spawn_tied(cmd: &mut Command) -> io::Result<Child> {
     cmd.spawn()
 }
 
-/// Lets Windows move the window when its header bar is dragged, so it
-/// snaps to screen edges (top: maximize) like other apps. GTK moves
-/// client-side decorated windows itself, and Windows never sees that.
-/// Presses on buttons and entries are left to GTK, and so are double
-/// clicks (maximize).
-#[cfg(windows)]
-pub fn native_move(header: &impl gtk::prelude::IsA<gtk::Widget>, window: &impl gtk::prelude::IsA<gtk::Window>) {
-    use gtk::prelude::*;
-    // TERMVISOR_GTK_MOVE=1 leaves moving to GTK, to compare the two.
-    if std::env::var_os("TERMVISOR_GTK_MOVE").is_some() {
-        return;
-    }
-    let g = gtk::GestureClick::new();
-    g.set_button(1);
-    g.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let (h, w) = (header.as_ref().downgrade(), window.as_ref().downgrade());
-    g.connect_pressed(move |g, n, x, y| {
-        let (Some(h), Some(w)) = (h.upgrade(), w.upgrade()) else { return };
-        if n != 1 || h.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|t| win::interactive(&t, &h)) {
-            return;
-        }
-        let Some(surface) = w.surface() else { return };
-        g.set_state(gtk::EventSequenceState::Claimed);
-        g.reset();
-        win::drag(&surface);
-    });
-    header.as_ref().add_controller(g);
-    // Windows only snaps windows that say they can be resized and
-    // maximized; GTK leaves both flags off. Set them once it is on screen.
-    window.as_ref().connect_map(|w| {
-        let w = w.downgrade();
-        gtk::glib::idle_add_local_once(move || {
-            if let Some(s) = w.upgrade().and_then(|w| w.surface()) {
-                win::snap_styles(&s);
-            }
-        });
-    });
-}
-
 /// Quotes one argument the way the Windows C runtime splits command lines.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn quote(arg: &str) -> String {
@@ -242,67 +203,6 @@ mod win {
                 Some(job as isize)
             }
         })
-    }
-
-    /// True for a widget that handles its own clicks: buttons, entries.
-    pub fn interactive(target: &gtk::Widget, stop: &gtk::Widget) -> bool {
-        use gtk::prelude::*;
-        let mut cur = Some(target.clone());
-        while let Some(w) = cur {
-            if &w == stop {
-                return false;
-            }
-            if w.is::<gtk::Button>() || w.is::<gtk::MenuButton>() || w.is::<gtk::Text>() || w.is::<gtk::Entry>() || w.is::<gtk::DropDown>() {
-                return true;
-            }
-            cur = w.parent();
-        }
-        false
-    }
-
-    unsafe extern "C" {
-        fn gdk_win32_surface_get_handle(surface: *mut gtk::gdk::ffi::GdkSurface) -> *mut std::ffi::c_void;
-    }
-
-    /// Adds WS_THICKFRAME and WS_MAXIMIZEBOX to the window of `surface`.
-    pub fn snap_styles(surface: &gtk::gdk::Surface) {
-        use gtk::glib::translate::ToGlibPtr;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            SWP_NOZORDER, WS_MAXIMIZEBOX, WS_THICKFRAME,
-        };
-        // SAFETY: the surface is a live Win32 surface; its handle is used
-        // for these calls only.
-        unsafe {
-            let hwnd = gdk_win32_surface_get_handle(surface.to_glib_none().0);
-            if hwnd.is_null() {
-                return;
-            }
-            let style = GetWindowLongPtrW(hwnd as _, GWL_STYLE);
-            let want = style | (WS_THICKFRAME | WS_MAXIMIZEBOX) as isize;
-            if want != style {
-                SetWindowLongPtrW(hwnd as _, GWL_STYLE, want);
-                SetWindowPos(hwnd as _, std::ptr::null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-            }
-        }
-    }
-
-    /// Starts the Windows move loop for `surface`, as if its title bar was
-    /// pressed.
-    pub fn drag(surface: &gtk::gdk::Surface) {
-        use gtk::glib::translate::ToGlibPtr;
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, HTCAPTION, WM_NCLBUTTONDOWN};
-        // SAFETY: the surface is a live Win32 surface; the handle is only
-        // used for these two calls.
-        unsafe {
-            let hwnd = gdk_win32_surface_get_handle(surface.to_glib_none().0);
-            if hwnd.is_null() {
-                return;
-            }
-            ReleaseCapture();
-            PostMessageW(hwnd as _, WM_NCLBUTTONDOWN, HTCAPTION as usize, 0);
-        }
     }
 
     pub fn tie(child: &Child) {

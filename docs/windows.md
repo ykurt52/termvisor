@@ -30,7 +30,6 @@ it with Pango and turns keys and mouse into input.
 | Traceroute | `tracepath -n` | `tracert -d` |
 | Server URLs | all IPv4 addresses | main address and loopback |
 | Child cleanup | `PR_SET_PDEATHSIG` | job object that ends its processes when termvisor exits |
-| Moving the window | GTK moves it | dragging the header bar hands the move to Windows (`WM_NCLBUTTONDOWN`, `sys::native_move`), so the top edge maximizes and the sides snap; GTK 4.18 dropped its own snap emulation |
 | Background programs (adb, ssh for tunnels and SFTP, tracert) | plain child | `sys::command` adds `CREATE_NO_WINDOW`, so no console window opens |
 | USB capture | usbmon | not available (page hidden) |
 | Release All | other instances and their ports | locks and sockets only |

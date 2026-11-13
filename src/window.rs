@@ -438,8 +438,6 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         .default_height(760)
         .content(&body)
         .build();
-    #[cfg(windows)]
-    crate::sys::native_move(&header, &win);
 
     let weak = view.downgrade();
     let st = state.clone();
