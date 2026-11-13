@@ -1,6 +1,6 @@
 # Maintainer: Yunus Kurt <yunuskkurt@gmail.com>
 pkgname=termvisor
-pkgver=1.0.3
+pkgver=1.0.4
 pkgrel=1
 pkgdesc='Multi-protocol terminal and remote access tool'
 arch=('x86_64' 'aarch64')
@@ -12,7 +12,7 @@ optdepends=('mosh: mosh sessions'
             'android-tools: Android shell, logcat and files'
             'iputils: ping and tracepath tools')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('1a0d38ca86304a77eed6bc045ddf20555265762ea0beebd38c1d10f968abf140')
+sha256sums=('44ff7a19ce8297b91d6de195e89aae07fd1da6d869582258d8e375aa411e4715')
 
 prepare() {
   cd "$pkgname-$pkgver"
