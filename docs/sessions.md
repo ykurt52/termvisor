@@ -10,7 +10,8 @@ The Sessions panel shows, top to bottom:
 5. **SSH Config**: hosts from `~/.ssh/config` (read-only, wildcards skipped)
 
 Empty sections are hidden. The recent list is kept in
-`~/.local/state/termvisor/recent.json` (or `$XDG_STATE_HOME`).
+`~/.local/state/termvisor/recent.json` (or `$XDG_STATE_HOME`). Right-click
+an entry → Remove from Recent, or the Recent folder → Clear Recent.
 
 ## Find Session (Ctrl+Shift+K)
 

@@ -25,8 +25,11 @@ fn run() -> Result<(), String> {
     let base = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
     let root = Path::new(&base).join("termvisor").join("portable");
     let dir = prepare(&root, ID, BUNDLE).map_err(|e| format!("unpacking into {}: {e}", root.display()))?;
+    // termvisor updates this exe in place, so it needs to know where it is.
+    let me = std::env::current_exe().map_err(|e| e.to_string())?;
     Command::new(dir.join(EXE))
         .args(std::env::args_os().skip(1))
+        .env("TERMVISOR_PORTABLE", me)
         .spawn()
         .map_err(|e| format!("{}: {e}", dir.join(EXE).display()))?;
     clean(&root, ID);

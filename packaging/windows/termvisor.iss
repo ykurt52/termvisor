@@ -61,8 +61,15 @@ Name: "{autodesktop}\termvisor"; Filename: "{app}\termvisor.exe"; IconFilename: 
 
 [Run]
 Filename: "{app}\termvisor.exe"; Description: "{cm:LaunchProgram,termvisor}"; Flags: nowait postinstall skipifsilent
+; Update from inside termvisor (/relaunch=1): start it again, not as admin.
+Filename: "{app}\termvisor.exe"; Flags: nowait runasoriginaluser; Check: Relaunch
 
 [Code]
+function Relaunch(): Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{{#AppGuid}}_is1';
 

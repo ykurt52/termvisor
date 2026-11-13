@@ -3,6 +3,7 @@
 // No console window next to the GUI on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod about;
 mod adb;
 mod askpass;
 mod cmdpanel;
@@ -40,6 +41,7 @@ mod recent;
 mod recover;
 mod render;
 mod remote;
+mod selfupdate;
 mod sessions;
 mod serial;
 mod streampane;

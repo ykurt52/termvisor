@@ -15,6 +15,7 @@ it with Pango and turns keys and mouse into input.
 | 4 | Windows build in CI, zip with the GTK runtime | done, CI builds the zip |
 | 5 | Installer with upgrade and downgrade guard | done, run on Windows |
 | 6 | Portable single exe, icon and version info in the exe | done, run on Windows |
+| 7 | One-click update from inside the app (installer and portable) | written, waiting for a Windows test |
 
 ## Windows differences
 

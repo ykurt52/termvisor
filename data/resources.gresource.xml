@@ -2,5 +2,6 @@
 <gresources>
   <gresource prefix="/io/github/ykurt52/termvisor">
     <file preprocess="xml-stripblanks" alias="icons/scalable/apps/io.github.ykurt52.termvisor.svg">icons/hicolor/scalable/apps/io.github.ykurt52.termvisor.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/termvisor-plot-symbolic.svg">icons/hicolor/scalable/actions/termvisor-plot-symbolic.svg</file>
   </gresource>
 </gresources>

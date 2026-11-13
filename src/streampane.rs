@@ -818,7 +818,6 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
     files.set_menu_model(Some(&transfer_menu()));
     let again = button("view-refresh-symbolic", "Reconnect");
     let clear = button("edit-clear-symbolic", "Clear screen and scrollback");
-    let graph = button("utilities-system-monitor-symbolic", "Plot values (Ctrl+Shift+G)");
 
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     bar.add_css_class("serialbar");
@@ -836,7 +835,6 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
         brk.upcast_ref(),
         files.upcast_ref(),
         again.upcast_ref(),
-        graph.upcast_ref(),
         clear.upcast_ref(),
     ] {
         bar.append(w);
@@ -901,13 +899,6 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
         }
         pp.hex.borrow_mut().reset();
         pp.mav.borrow_mut().reset();
-    });
-
-    let tw = t.downgrade();
-    graph.connect_clicked(move |_| {
-        if let Some(t) = tw.upgrade() {
-            crate::pane::toggle_plot(&t);
-        }
     });
 
     // Typed text goes to the link (and to the other multi-exec panes).

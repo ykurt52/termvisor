@@ -12,7 +12,7 @@ use crate::tunnelpage;
 use crate::toolspage;
 use crate::editor::{self, Mode};
 use crate::files::Files;
-use crate::sessions::{self, Node, NodeKind};
+use crate::sessions::{self, Node, NodeKind, RecentRow};
 use crate::state::State;
 use crate::store::{self, Entry, Folder, Ssh};
 use crate::keyring;
@@ -221,6 +221,12 @@ fn row_menu(node: Option<&Node>) -> gio::Menu {
                 items.push(menu_item("Copy to Sessions", "sess.copy", None));
             }
             menu.append_section(None, &section(&items));
+            if node.is_some_and(|n| n.recent.is_some()) {
+                menu.append_section(None, &section(&[menu_item("Remove from Recent", "sess.forget-recent", None)]));
+            }
+        }
+        Some((NodeKind::Folder(_), None, _)) if node.is_some_and(|n| n.recent == Some(RecentRow::Folder)) => {
+            menu.append_section(None, &section(&[menu_item("Clear Recent", "sess.forget-recent", None)]));
         }
         _ => menu.append_section(None, &create(&[], false)),
     }
@@ -336,6 +342,17 @@ fn row_actions(state: &Rc<State>, open: &OpenFn, ctx: &Rc<RefCell<Option<Node>>>
         let Some(host) = c.borrow().as_ref().and_then(|n| n.host.clone()) else { return };
         let e = Entry::Ssh(Ssh { name: host.clone(), host, ..Default::default() });
         r(st.edit_sessions(|s| s.insert(&[], None, e)));
+    }));
+
+    // One row of Recent, or all of it from the folder's menu.
+    let (st, c) = (state.clone(), ctx.clone());
+    add("forget-recent", None, Box::new(move |_| {
+        let row = c.borrow().as_ref().and_then(|n| n.recent);
+        match row {
+            Some(RecentRow::Item(i)) => st.forget_recent(Some(i)),
+            Some(RecentRow::Folder) => st.forget_recent(None),
+            None => {}
+        }
     }));
 
     for (name, folder) in [("new-session", false), ("new-folder", true)] {

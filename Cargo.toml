@@ -1,6 +1,6 @@
 [package]
 name = "termvisor"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2021"
 rust-version = "1.92"
 license = "GPL-3.0-or-later"
@@ -25,6 +25,7 @@ suppaftp = { version = "12", features = ["native-tls"] }
 zmodem2 = "0.7"
 alacritty_terminal = "0.26"
 native-tls = "0.2"
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libsecret = "0.9"

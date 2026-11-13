@@ -15,6 +15,8 @@ use crate::editor;
 use crate::palette;
 use crate::pane;
 use crate::recover;
+use crate::selfupdate::{self, Install};
+use crate::update::Release;
 use crate::streampane;
 use crate::recent::{self, Recent};
 use crate::ftp::FtpCfg;
@@ -588,22 +590,119 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
 }
 
 /// Asks GitHub on every start and offers a newer release in a toast that
-/// stays until closed.
+/// stays until closed. Installs that can replace themselves get an Update
+/// button, the rest a link to the release page.
 fn check_update(ui: &Ui) {
     if !ui.state.cfg.borrow().update_check {
         return;
     }
-    let (toasts, win) = (ui.toasts.downgrade(), ui.win.downgrade());
+    let u = ui.clone();
     crate::update::check(move |r| {
-        let Some(toasts) = toasts.upgrade() else { return };
+        let install = Install::detect();
+        let can = selfupdate::asset(&install, &r).is_some();
         let toast = adw::Toast::new(&format!("termvisor {} is available", r.version));
         toast.set_timeout(0);
-        toast.set_button_label(Some("Download"));
-        let url = r.url;
+        toast.set_button_label(Some(if can { "Update" } else { "Download" }));
+        let (w, r) = (u.clone(), Rc::new(r));
         toast.connect_button_clicked(move |_| {
-            gtk::UriLauncher::new(&url).launch(win.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
+            if can {
+                confirm_update(&w, r.clone(), install.clone());
+            } else {
+                open_uri(&w.win, &r.url);
+            }
         });
-        toasts.add_toast(toast);
+        u.toasts.add_toast(toast);
+    });
+}
+
+fn open_uri(win: &adw::ApplicationWindow, url: &str) {
+    gtk::UriLauncher::new(url).launch(Some(win), None::<&gio::Cancellable>, |_| {});
+}
+
+/// Asks first when sessions are open, since termvisor restarts.
+fn confirm_update(ui: &Ui, r: Rc<Release>, install: Install) {
+    let open = ui.tabs().len();
+    if open == 0 {
+        run_update(ui, r, install);
+        return;
+    }
+    let body = format!(
+        "termvisor will close and start again with the new version. {open} open session{} will be closed.",
+        if open == 1 { "" } else { "s" }
+    );
+    let d = adw::AlertDialog::new(Some(&format!("Update to termvisor {}?", r.version)), Some(&body));
+    d.add_responses(&[("cancel", "Cancel"), ("update", "Update")]);
+    d.set_response_appearance("update", adw::ResponseAppearance::Suggested);
+    d.set_default_response(Some("update"));
+    d.set_close_response("cancel");
+    let u = ui.clone();
+    d.connect_response(None, move |_, resp| {
+        if resp == "update" {
+            run_update(&u, r.clone(), install.clone());
+        }
+    });
+    d.present(Some(&ui.win));
+}
+
+enum UpdateMsg {
+    Progress(u64),
+    Done(Result<std::path::PathBuf, String>),
+}
+
+/// Downloads with a progress toast, then hands over to the new version and
+/// closes every window. Errors end in a toast with the release page.
+fn run_update(ui: &Ui, r: Rc<Release>, install: Install) {
+    let Some(asset) = selfupdate::asset(&install, &r).cloned() else { return };
+    let version = r.version.clone();
+    let title = move |pct: u64| format!("Downloading termvisor {version}… {pct}%");
+    let toast = adw::Toast::new(&title(0));
+    toast.set_timeout(0);
+    ui.toasts.add_toast(toast.clone());
+    let (tx, rx) = async_channel::unbounded();
+    let inst = install.clone();
+    std::thread::spawn(move || {
+        let result = selfupdate::target(&inst, &asset).and_then(|dest| {
+            let mut last = u64::MAX;
+            crate::update::download(&asset, &dest, &mut |got, total| {
+                let pct = (got * 100).checked_div(total).unwrap_or(0);
+                if pct != last {
+                    last = pct;
+                    let _ = tx.send_blocking(UpdateMsg::Progress(pct));
+                }
+            })
+            .map(|_| dest)
+        });
+        let _ = tx.send_blocking(UpdateMsg::Done(result));
+    });
+    let u = ui.clone();
+    glib::spawn_future_local(async move {
+        while let Ok(msg) = rx.recv().await {
+            match msg {
+                UpdateMsg::Progress(pct) => toast.set_title(&title(pct)),
+                UpdateMsg::Done(result) => {
+                    toast.dismiss();
+                    match result.and_then(|file| selfupdate::apply(&install, &file)) {
+                        Ok(()) => {
+                            if let Some(app) = u.win.application() {
+                                for w in app.windows() {
+                                    w.close();
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            crate::warn(&format!("update: {e}"));
+                            let t = adw::Toast::new(&format!("Update failed: {e}"));
+                            t.set_timeout(0);
+                            t.set_button_label(Some("Open Release Page"));
+                            let (w, url) = (u.win.clone(), r.url.clone());
+                            t.connect_button_clicked(move |_| open_uri(&w, &url));
+                            u.toasts.add_toast(t);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
     });
 }
 
@@ -662,6 +761,9 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     let rescue = gio::Menu::new();
     rescue.append(Some("Release All Connections…"), Some("win.release-all"));
     menu.append_section(None, &rescue);
+    let about = gio::Menu::new();
+    about.append(Some("About termvisor"), Some("win.about"));
+    menu.append_section(None, &about);
     menu
 }
 
@@ -781,6 +883,7 @@ fn add_actions(ui: &Ui) {
     });
     ui.win.add_action(&me);
     action(ui, "preferences", None, |u, _| crate::prefs::open(&u.win, &u.state));
+    action(ui, "about", None, |u, _| crate::about::open(&u.win));
     action(ui, "palette", None, |u, _| command_palette(u));
     action(ui, "edit-theme", None, |u, _| crate::themeedit::open(&u.win, &u.state));
     action(ui, "release-all", None, |u, _| u.release());

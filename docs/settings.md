@@ -18,12 +18,32 @@ Everything is also plain text in `~/.config/termvisor/`.
 On every start the main window asks GitHub for the latest release
 (`api.github.com/repos/ykurt52/termvisor/releases/latest`, one HTTPS
 request). When it is newer than the running version, a toast says
-"termvisor X.Y.Z is available"; Download opens the release page. Closing
-the toast hides it until the next start. Network errors only go to the
-log.
+"termvisor X.Y.Z is available". Closing the toast hides it until the next
+start. Network errors only go to the log.
+
+| Install | Button | What it does |
+|---|---|---|
+| Windows installer | Update | downloads `_setup.exe`, checks its SHA-256 against the release, runs it silently (`/SILENT /relaunch=1`) and closes; the installer starts termvisor again |
+| Windows portable exe | Update | downloads `_portable.exe` next to the old one, checks its SHA-256, deletes the old exe (a renamed one is replaced in place) and starts the new one |
+| deb, AUR, own build | Download | opens the release page; the package manager updates packages |
+
+With open sessions it asks first, since termvisor restarts. A failed
+download or check ends in a toast with the release page; nothing is
+changed then. The kind of install is detected from the exe: the
+uninstaller next to it means installer, `TERMVISOR_PORTABLE` (set by the
+portable launcher) means portable.
+
+To try the update path against the current release, start termvisor with
+`TERMVISOR_PRETEND_VERSION=1.0.0`; it then offers the latest release.
 
 Turn it off with Preferences → Panes → Check for Updates
 (`update_check` in `settings.json`, on by default).
+
+## About
+
+Menu → About termvisor: version, publisher, website, license, the notes
+of the newest release and, under Troubleshooting, the OS, GTK version and
+install kind to paste into a bug report.
 
 ## Shortcuts
 

@@ -11,9 +11,10 @@ kanal,adc,pid,a           → channel names
 bla bla bla               → skipped (still shown in the terminal)
 ```
 
-Open it with Ctrl+Shift+G (menu → Plot Values), or the graph button in
-the toolbar of serial, TCP and telnet panes. The pane splits: graph above,
-terminal below (drag the handle between them). The same keys close it.
+Open it with the **Plot** button in the bottom right corner of the pane,
+Ctrl+Shift+G or menu → Plot Values. The pane splits: graph above, terminal
+below (drag the handle between them). The button is highlighted while the
+plot is shown; it and the same keys close it.
 It works in every pane: serial, TCP, telnet, SSH, shell.
 
 ![Plot of four channels above a serial pane](images/plot.png)

@@ -220,6 +220,24 @@ impl State {
         self.notify();
     }
 
+    /// Removes entry `i` of the recent list; `None` clears it.
+    pub fn forget_recent(&self, i: Option<usize>) {
+        {
+            let mut list = self.recent.borrow_mut();
+            match i {
+                Some(i) if i < list.len() => {
+                    list.remove(i);
+                }
+                Some(_) => return,
+                None => list.clear(),
+            }
+        }
+        if let Err(e) = recent::save(recent::RECENT, &self.recent.borrow()) {
+            crate::warn(&format!("save recent: {e}"));
+        }
+        self.notify();
+    }
+
     fn notify(&self) {
         for f in self.listeners.borrow().iter() {
             f();

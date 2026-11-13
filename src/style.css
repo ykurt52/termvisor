@@ -143,8 +143,34 @@ tabbar tab:selected {
   font-size: 0.85em;
 }
 
+/* Toolbar buttons: hover, pressed and on/off are easy to tell apart. */
+.serialbar button:hover,
+.serialbar togglebutton:hover {
+  background-color: alpha(currentColor, 0.12);
+}
+
+.serialbar button:active,
+.serialbar togglebutton:active {
+  background-color: alpha(currentColor, 0.22);
+}
+
+.serialbar togglebutton {
+  color: alpha(currentColor, 0.6);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, 0.15);
+}
+
 .serialbar togglebutton:checked {
-  color: @accent_color;
+  color: @accent_fg_color;
+  background-color: @accent_bg_color;
+  box-shadow: none;
+}
+
+.serialbar togglebutton:checked:hover {
+  background-color: mix(@accent_bg_color, @accent_fg_color, 0.12);
+}
+
+.serialbar togglebutton:checked:active {
+  background-color: mix(@accent_bg_color, black, 0.15);
 }
 
 .statusbar.kind-net {
@@ -247,4 +273,30 @@ tabbar tab:selected {
   border-radius: 6px;
   background-color: alpha(@window_bg_color, 0.85);
   font-size: 0.85em;
+}
+
+/* Plot button in the corner of each pane: faint until pointed at. */
+button.plot-button {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 0.85em;
+  opacity: 0.55;
+  background-color: alpha(@window_bg_color, 0.85);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, 0.15);
+}
+
+button.plot-button:hover {
+  opacity: 1;
+  background-color: mix(@window_bg_color, currentColor, 0.12);
+}
+
+button.plot-button:active {
+  background-color: mix(@window_bg_color, currentColor, 0.22);
+}
+
+button.plot-button.on {
+  opacity: 1;
+  color: @accent_fg_color;
+  background-color: @accent_bg_color;
+  box-shadow: none;
 }

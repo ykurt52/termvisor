@@ -35,6 +35,7 @@ pub const ACTIONS: &[(&str, &str, &[&str])] = &[
     ("win.edit-theme", "Edit Theme…", &[]),
     ("win.preferences", "Preferences…", &["<Ctrl>comma"]),
     ("win.release-all", "Release All Connections…", &["<Ctrl><Shift>r"]),
+    ("win.about", "About termvisor", &[]),
 ];
 
 /// Shortcuts changed by the user: action -> keys (empty: none).

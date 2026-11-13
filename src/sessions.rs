@@ -21,7 +21,16 @@ pub struct Node {
     pub path: Option<Vec<usize>>,
     /// Host alias for ~/.ssh/config rows (can be copied into the store).
     pub host: Option<String>,
+    /// Row of the Recent folder, or the folder itself.
+    pub recent: Option<RecentRow>,
     pub kind: NodeKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RecentRow {
+    Folder,
+    /// Index in the recent list.
+    Item(usize),
 }
 
 #[derive(Clone)]
@@ -34,11 +43,11 @@ pub enum NodeKind {
 
 impl Node {
     fn item(name: &str, icon: &'static str, tint: &'static str, launch: Result<Launch, String>) -> Self {
-        Self { name: name.into(), icon, tint, star: false, path: None, host: None, kind: NodeKind::Item(launch) }
+        Self { name: name.into(), icon, tint, star: false, path: None, host: None, recent: None, kind: NodeKind::Item(launch) }
     }
 
     fn folder(name: &str, icon: &'static str, tint: &'static str, kids: Vec<Node>) -> Self {
-        Self { name: name.into(), icon, tint, star: false, path: None, host: None, kind: NodeKind::Folder(kids) }
+        Self { name: name.into(), icon, tint, star: false, path: None, host: None, recent: None, kind: NodeKind::Folder(kids) }
     }
 
     /// Copy keeping only items whose name contains `query` (lowercase).
@@ -93,6 +102,7 @@ fn stored(root: &[Entry], list: &[Entry], prefix: &[usize]) -> Vec<Node> {
                 star: e.favorite(),
                 path: Some(path),
                 host: None,
+                recent: None,
                 kind,
             }
         })
@@ -181,13 +191,17 @@ pub fn tree(root: &[Entry], recent: &[Recent]) -> Vec<Node> {
     if !recent.is_empty() {
         let items = recent
             .iter()
-            .map(|r| {
+            .enumerate()
+            .map(|(i, r)| {
                 let l = r.launch();
                 let (icon, tint) = kind_look(l.kind);
-                Node::item(&r.title, icon, tint, Ok(l))
+                Node { recent: Some(RecentRow::Item(i)), ..Node::item(&r.title, icon, tint, Ok(l)) }
             })
             .collect();
-        out.push(Node::folder("Recent", "document-open-recent-symbolic", "tint-magenta", items));
+        out.push(Node {
+            recent: Some(RecentRow::Folder),
+            ..Node::folder("Recent", "document-open-recent-symbolic", "tint-magenta", items)
+        });
     }
     out.extend(base);
     out

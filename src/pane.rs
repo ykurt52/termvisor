@@ -123,7 +123,11 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget
             (t, leaf)
         }
     };
-    let leaf = multi::wrap(&t, &leaf).upcast::<gtk::Widget>();
+    let overlay = multi::wrap(&t, &leaf);
+    if output::of(&t).is_some() {
+        overlay.add_overlay(&plot_button(&t));
+    }
+    let leaf = overlay.upcast::<gtk::Widget>();
     leaf.add_css_class(LEAF_CLASS);
     leaf.set_hexpand(true);
     leaf.set_vexpand(true);
@@ -181,6 +185,37 @@ thread_local! {
 }
 
 const PLOT_SPLIT: &str = "plot-split";
+const PLOT_BUTTON: &str = "plot-button";
+
+/// Bottom right of the pane: shows or hides the plot, highlighted while shown.
+fn plot_button(term: &crate::vt::View) -> gtk::Button {
+    let content = adw::ButtonContent::builder().icon_name("termvisor-plot-symbolic").label("Plot").build();
+    let b = gtk::Button::builder().child(&content).tooltip_text("Plot the numbers this pane prints (Ctrl+Shift+G)").build();
+    b.add_css_class(PLOT_BUTTON);
+    b.set_halign(gtk::Align::End);
+    b.set_valign(gtk::Align::End);
+    b.set_margin_end(18);
+    b.set_margin_bottom(8);
+    b.set_focus_on_click(false);
+    let w = term.downgrade();
+    b.connect_clicked(move |_| {
+        if let Some(t) = w.upgrade() {
+            toggle_plot(&t);
+        }
+    });
+    b
+}
+
+/// Marks the pane's plot button as on or off.
+fn mark_plot(overlay: &gtk::Overlay, on: bool) {
+    let mut cur = overlay.first_child();
+    while let Some(w) = cur {
+        if w.has_css_class(PLOT_BUTTON) {
+            if on { w.add_css_class("on") } else { w.remove_css_class("on") }
+        }
+        cur = w.next_sibling();
+    }
+}
 
 /// Shows or hides a live plot of the numbers `term` prints, above it.
 pub fn toggle_plot(term: &crate::vt::View) {
@@ -191,6 +226,7 @@ pub fn toggle_plot(term: &crate::vt::View) {
         split.set_end_child(None::<&gtk::Widget>);
         overlay.set_child(content.as_ref());
         PLOTS.with(|v| v.borrow_mut().retain(|(w, _)| w.upgrade().is_some_and(|t| &t != term)));
+        mark_plot(&overlay, false);
         term.grab_focus();
         return;
     }
@@ -204,6 +240,7 @@ pub fn toggle_plot(term: &crate::vt::View) {
     split.set_end_child(Some(&child));
     split.set_position((overlay.height() * 45 / 100).max(220));
     overlay.set_child(Some(&split));
+    mark_plot(&overlay, true);
     PLOTS.with(|v| {
         let mut v = v.borrow_mut();
         v.retain(|(w, _)| w.upgrade().is_some());
