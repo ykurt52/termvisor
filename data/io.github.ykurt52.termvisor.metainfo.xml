@@ -72,6 +72,11 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.6" date="2026-11-13">
+      <description>
+        <p>Up to four plot charts with cursors, thresholds, statistics and PNG export; Check for Updates in Preferences; Ctrl+wheel text size per pane. On Windows the portable exe no longer delays window resizing, and pane widgets no longer cover toolbars or text.</p>
+      </description>
+    </release>
     <release version="1.0.5" date="2026-11-13">
       <description>
         <p>One-click update on Windows, an About window, removing entries from Recent, a Plot button in every pane and clearer toolbar buttons.</p>
