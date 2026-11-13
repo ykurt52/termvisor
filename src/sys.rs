@@ -123,6 +123,10 @@ pub fn spawn_tied(cmd: &mut Command) -> io::Result<Child> {
 #[cfg(windows)]
 pub fn native_move(header: &impl gtk::prelude::IsA<gtk::Widget>, window: &impl gtk::prelude::IsA<gtk::Window>) {
     use gtk::prelude::*;
+    // TERMVISOR_GTK_MOVE=1 leaves moving to GTK, to compare the two.
+    if std::env::var_os("TERMVISOR_GTK_MOVE").is_some() {
+        return;
+    }
     let g = gtk::GestureClick::new();
     g.set_button(1);
     g.set_propagation_phase(gtk::PropagationPhase::Capture);
