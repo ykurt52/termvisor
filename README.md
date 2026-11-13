@@ -1,6 +1,14 @@
 # termvisor
 
-One window for the terminals of embedded and network work on Linux:
+[![CI](https://github.com/ykurt52/termvisor/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ykurt52/termvisor/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ykurt52/termvisor)](https://github.com/ykurt52/termvisor/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ykurt52/termvisor/total)](https://github.com/ykurt52/termvisor/releases)
+[![License: GPL-3.0-or-later](https://img.shields.io/github/license/ykurt52/termvisor)](LICENSE)
+![Platforms: Linux, Windows](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows-blue)
+[![Stars](https://img.shields.io/github/stars/ykurt52/termvisor)](https://github.com/ykurt52/termvisor/stargazers)
+[![Sponsor](https://img.shields.io/github/sponsors/ykurt52?label=Sponsor&logo=GitHub)](https://github.com/sponsors/ykurt52)
+
+One window for the terminals of embedded and network work on Linux and Windows:
 serial ports, SSH, telnet, raw TCP, FTP, Android and USB, in tabs and
 split panes. Open source (GPL-3.0-or-later), written in Rust with GTK 4.
 
