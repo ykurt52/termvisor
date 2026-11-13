@@ -72,6 +72,11 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.5" date="2026-11-13">
+      <description>
+        <p>One-click update on Windows, an About window, removing entries from Recent, a Plot button in every pane and clearer toolbar buttons.</p>
+      </description>
+    </release>
     <release version="1.0.4" date="2026-11-13">
       <description>
         <p>Windows serial ports: DTR and RTS are set on connect, and typed text no longer waits up to half a second. Checks for a new release on every start.</p>
