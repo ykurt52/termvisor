@@ -1,5 +1,5 @@
 // Recently opened sessions and the saved tab list, kept under
-// $XDG_STATE_HOME/termvisor/.
+// $XDG_STATE_HOME/termvisor/. `path` also places other state files there.
 
 use std::fs;
 use std::io;
@@ -87,7 +87,7 @@ impl Recent {
 pub const RECENT: &str = "recent.json";
 pub const TABS: &str = "tabs.json";
 
-fn path(name: &str) -> PathBuf {
+pub fn path(name: &str) -> PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())

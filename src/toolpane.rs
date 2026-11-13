@@ -105,7 +105,7 @@ pub fn build(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widge
     };
     let leaf = gtk::Box::new(gtk::Orientation::Vertical, 0);
     for w in &top {
-        leaf.append(w);
+        leaf.append(&term::fit(w));
     }
     leaf.append(&term::scroll(&t));
     (t, leaf.upcast())

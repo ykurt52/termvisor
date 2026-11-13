@@ -553,7 +553,7 @@ pub fn build(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widge
     });
 
     let leaf = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    leaf.append(&bar);
+    leaf.append(&term::fit(&bar));
     leaf.append(&term::scroll(&t));
     (t, leaf.upcast())
 }

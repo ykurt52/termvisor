@@ -137,7 +137,7 @@ tabbar tab:selected {
 }
 
 .serialbar button,
-.serialbar togglebutton {
+.serialbar > button.toggle {
   min-height: 24px;
   padding: 0 8px;
   font-size: 0.85em;
@@ -145,31 +145,31 @@ tabbar tab:selected {
 
 /* Toolbar buttons: hover, pressed and on/off are easy to tell apart. */
 .serialbar button:hover,
-.serialbar togglebutton:hover {
+.serialbar > button.toggle:hover {
   background-color: alpha(currentColor, 0.12);
 }
 
 .serialbar button:active,
-.serialbar togglebutton:active {
+.serialbar > button.toggle:active {
   background-color: alpha(currentColor, 0.22);
 }
 
-.serialbar togglebutton {
+.serialbar > button.toggle {
   color: alpha(currentColor, 0.6);
   box-shadow: inset 0 0 0 1px alpha(currentColor, 0.15);
 }
 
-.serialbar togglebutton:checked {
+.serialbar > button.toggle:checked {
   color: @accent_fg_color;
   background-color: @accent_bg_color;
   box-shadow: none;
 }
 
-.serialbar togglebutton:checked:hover {
+.serialbar > button.toggle:checked:hover {
   background-color: mix(@accent_bg_color, @accent_fg_color, 0.12);
 }
 
-.serialbar togglebutton:checked:active {
+.serialbar > button.toggle:checked:active {
   background-color: mix(@accent_bg_color, black, 0.15);
 }
 

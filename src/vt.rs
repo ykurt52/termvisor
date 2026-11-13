@@ -1039,9 +1039,22 @@ impl View {
 
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         let v = self.downgrade();
+        // Ctrl+wheel: text size of this pane. Touchpads send small steps,
+        // so they add up to whole notches first.
+        let zoom = std::rc::Rc::new(std::cell::Cell::new(0.0));
         scroll.connect_scroll(move |c, _, dy| {
             let Some(v) = v.upgrade() else { return glib::Propagation::Proceed };
-            v.wheel(dy, c.current_event_state());
+            let m = c.current_event_state();
+            if m.contains(gdk::ModifierType::CONTROL_MASK) {
+                let acc = zoom.get() + dy;
+                let notches = acc.trunc();
+                zoom.set(acc - notches);
+                if notches != 0.0 {
+                    v.set_font_scale(zoom_step(v.font_scale(), -notches as i32));
+                }
+                return glib::Propagation::Stop;
+            }
+            v.wheel(dy, m);
             glib::Propagation::Stop
         });
         self.add_controller(scroll);
@@ -1318,9 +1331,23 @@ impl View {
     }
 }
 
+/// Text scale `steps` notches up (positive) or down from `scale`, 10% a
+/// notch, kept between 25% and 400% like the zoom shortcuts.
+pub fn zoom_step(scale: f64, steps: i32) -> f64 {
+    (scale * 1.1f64.powi(steps)).clamp(0.25, 4.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoom_steps() {
+        assert!((zoom_step(1.0, 1) - 1.1).abs() < 1e-9);
+        assert!((zoom_step(1.1, -1) - 1.0).abs() < 1e-9);
+        assert_eq!(zoom_step(3.9, 5), 4.0);
+        assert_eq!(zoom_step(0.3, -5), 0.25);
+    }
 
     #[test]
     fn keys() {

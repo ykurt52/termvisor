@@ -440,12 +440,49 @@ pub fn run(term: &crate::vt::View, launch: &Launch) {
 }
 
 /// Wraps a terminal in a scrolled window.
-pub fn scroll(term: &crate::vt::View) -> gtk::ScrolledWindow {
+pub fn scroll(term: &crate::vt::View) -> gtk::Overlay {
     let sw = gtk::ScrolledWindow::new();
     sw.set_hscrollbar_policy(gtk::PolicyType::Never);
     sw.set_hexpand(true);
     sw.set_vexpand(true);
     sw.set_child(Some(term));
+    // The Plot button sits on the terminal itself, clear of pane toolbars
+    // and send bars.
+    let o = gtk::Overlay::new();
+    o.set_hexpand(true);
+    o.set_vexpand(true);
+    o.set_child(Some(&sw));
+    if crate::output::of(term).is_some() {
+        // Shown while the pointer is on the terminal or the plot is open,
+        // so it does not hide text otherwise.
+        let b = crate::pane::plot_button(term);
+        b.set_visible(false);
+        o.add_overlay(&b);
+        let m = gtk::EventControllerMotion::new();
+        let w = b.downgrade();
+        m.connect_enter(move |_, _, _| {
+            if let Some(b) = w.upgrade() {
+                b.set_visible(true);
+            }
+        });
+        let w = b.downgrade();
+        m.connect_leave(move |_| {
+            if let Some(b) = w.upgrade() {
+                b.set_visible(b.has_css_class("on"));
+            }
+        });
+        o.add_controller(m);
+    }
+    o
+}
+
+/// A pane toolbar that scrolls sideways instead of being cut off when the
+/// pane is narrow; its start (name, mode) stays in view.
+pub fn fit(bar: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    let sw = gtk::ScrolledWindow::new();
+    sw.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
+    sw.set_propagate_natural_height(true);
+    sw.set_child(Some(bar));
     sw
 }
 

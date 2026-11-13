@@ -109,9 +109,11 @@ pub fn wrap(t: &crate::vt::View, leaf: &gtk::Widget) -> gtk::Overlay {
     o.add_overlay(&frame);
     let check = gtk::CheckButton::with_label("Multi-exec");
     check.add_css_class("multi-check");
-    // Top center: pane toolbars keep their controls at both ends.
-    check.set_halign(gtk::Align::Center);
+    // Top right of the terminal itself, clear of the pane toolbar.
+    check.set_halign(gtk::Align::End);
     check.set_valign(gtk::Align::Start);
+    check.set_margin_top(6);
+    check.set_margin_end(18);
     check.set_focus_on_click(false);
     check.set_visible(on());
     let w = t.downgrade();
@@ -120,7 +122,12 @@ pub fn wrap(t: &crate::vt::View, leaf: &gtk::Widget) -> gtk::Overlay {
             select(&t, c.is_active());
         }
     });
-    o.add_overlay(&check);
+    // term::scroll puts the terminal in an overlay: ScrolledWindow, then it.
+    let inner = t.parent().and_then(|sw| sw.parent()).and_downcast::<gtk::Overlay>();
+    match inner {
+        Some(i) => i.add_overlay(&check),
+        None => o.add_overlay(&check),
+    }
     MARKS.with(|m| m.borrow_mut().push(Mark { term: t.downgrade(), check: check.downgrade(), frame: frame.downgrade() }));
     o
 }

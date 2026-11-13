@@ -160,7 +160,7 @@ GTK's GPU renderer.
 | Split right | Ctrl+Shift+E |
 | Split down | Ctrl+Shift+O |
 | Copy / Paste | Ctrl+Shift+C / Ctrl+Shift+V |
-| Zoom in / out / reset | Ctrl++ / Ctrl+- / Ctrl+0 |
+| Zoom in / out / reset | Ctrl++ / Ctrl+- / Ctrl+0, Ctrl + wheel |
 | Quick connect | Ctrl+Shift+L |
 | Find session | Ctrl+Shift+K |
 | Release all connections | Ctrl+Shift+R |

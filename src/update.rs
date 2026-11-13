@@ -226,23 +226,32 @@ fn current() -> String {
     std::env::var("TERMVISOR_PRETEND_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
 }
 
-/// Checks in the background; `found` runs on the GTK thread with a release
-/// newer than this build.
-pub fn check(found: impl FnOnce(Release) + 'static) {
+/// True when `r` is newer than this build.
+pub fn is_newer(r: &Release) -> bool {
+    newer(&r.version, &current())
+}
+
+/// Asks GitHub in the background; `done` runs on the GTK thread with the
+/// latest release or the error.
+pub fn latest(done: impl FnOnce(Result<Release, String>) + 'static) {
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let _ = tx.send_blocking(fetch());
     });
     glib::spawn_future_local(async move {
-        match rx.recv().await {
-            Ok(Ok(r)) => {
-                if newer(&r.version, &current()) {
-                    found(r);
-                }
-            }
-            Ok(Err(e)) => crate::warn(&format!("update check: {e}")),
-            Err(_) => {}
+        if let Ok(r) = rx.recv().await {
+            done(r);
         }
+    });
+}
+
+/// Checks in the background; `found` runs on the GTK thread with a release
+/// newer than this build. Errors only go to the log.
+pub fn check(found: impl FnOnce(Release) + 'static) {
+    latest(move |r| match r {
+        Ok(r) if is_newer(&r) => found(r),
+        Ok(_) => {}
+        Err(e) => crate::warn(&format!("update check: {e}")),
     });
 }
 

@@ -39,6 +39,11 @@ To try the update path against the current release, start termvisor with
 Turn it off with Preferences → Panes → Check for Updates
 (`update_check` in `settings.json`, on by default).
 
+To check by hand: Preferences → Panes → Updates → Check Now (the answer
+shows in the row: up to date, a newer version, or the error; with a newer
+version the button becomes Update… and offers it in the window), or menu
+→ Check for Updates (the answer comes as a toast).
+
 ## About
 
 Menu → About termvisor: version, publisher, website, license, the notes
@@ -70,7 +75,7 @@ command palette and in `src/keybindings.rs`.
 | Close Pane | Ctrl+Shift+W |
 | Split Right / Down | Ctrl+Shift+E / Ctrl+Shift+O |
 | Copy / Paste | Ctrl+Shift+C / Ctrl+Shift+V |
-| Zoom In / Out / Reset | Ctrl++ / Ctrl+- / Ctrl+0 |
+| Zoom In / Out / Reset | Ctrl++ / Ctrl+- / Ctrl+0, or Ctrl + wheel over a pane (each pane has its own size) |
 | Quick Connect | Ctrl+Shift+L |
 | Find Session | Ctrl+Shift+K |
 | Command Palette | Ctrl+Shift+P |

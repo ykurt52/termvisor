@@ -963,10 +963,10 @@ pub fn build(state: &Rc<State>, launch: &Launch, src: Stream) -> (crate::vt::Vie
 
     let leaf = gtk::Box::new(gtk::Orientation::Vertical, 0);
     leaf.insert_action_group("pane", Some(&pane_actions(&p)));
-    leaf.append(&bar);
+    leaf.append(&term::fit(&bar));
     leaf.append(&term::scroll(&t));
     if !mirror {
-        leaf.append(&send_bar(&p));
+        leaf.append(&term::fit(&send_bar(&p)));
     }
     (t, leaf.upcast())
 }

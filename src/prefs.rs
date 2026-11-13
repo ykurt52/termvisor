@@ -1,6 +1,6 @@
 // Preferences window. Every change is applied and saved at once.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -245,6 +245,48 @@ fn rules(state: &Rc<State>, dlg: &adw::PreferencesDialog) -> adw::PreferencesGro
     g
 }
 
+/// "Check Now": the result shows in the row. With a newer release the
+/// button becomes Update…, which closes Preferences and offers it in the
+/// window.
+fn check_row(dlg: &adw::PreferencesDialog, host: &gtk::Widget) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title("Updates");
+    row.set_subtitle(&format!("termvisor {}", env!("CARGO_PKG_VERSION")));
+    let button = gtk::Button::with_label("Check Now");
+    button.set_valign(gtk::Align::Center);
+    row.add_suffix(&button);
+    let found = Rc::new(Cell::new(false));
+    let (r, d, h) = (row.downgrade(), dlg.downgrade(), host.downgrade());
+    button.connect_clicked(move |b| {
+        if found.get() {
+            if let (Some(d), Some(h)) = (d.upgrade(), h.upgrade()) {
+                d.close();
+                let _ = WidgetExt::activate_action(&h, "win.check-updates", None);
+            }
+            return;
+        }
+        let Some(row) = r.upgrade() else { return };
+        row.set_subtitle("Checking…");
+        b.set_sensitive(false);
+        let (r, b, found) = (row.downgrade(), b.downgrade(), found.clone());
+        crate::update::latest(move |res| {
+            let (Some(row), Some(b)) = (r.upgrade(), b.upgrade()) else { return };
+            b.set_sensitive(true);
+            match res {
+                Ok(rel) if crate::update::is_newer(&rel) => {
+                    row.set_subtitle(&format!("termvisor {} is available", rel.version));
+                    b.set_label("Update…");
+                    b.add_css_class("suggested-action");
+                    found.set(true);
+                }
+                Ok(_) => row.set_subtitle(&format!("termvisor {} is up to date", env!("CARGO_PKG_VERSION"))),
+                Err(e) => row.set_subtitle(&format!("Check failed: {e}")),
+            }
+        });
+    });
+    row
+}
+
 fn panes(state: &Rc<State>, dlg: &adw::PreferencesDialog, host: &gtk::Widget) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("Panes");
@@ -337,6 +379,7 @@ fn panes(state: &Rc<State>, dlg: &adw::PreferencesDialog, host: &gtk::Widget) ->
     for w in [restore.upcast_ref::<gtk::Widget>(), right.upcast_ref(), fkeys.upcast_ref(), updates.upcast_ref()] {
         win.add(w);
     }
+    win.add(&check_row(dlg, host));
     page.add(&win);
 
     let android = adw::PreferencesGroup::new();

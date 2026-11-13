@@ -123,11 +123,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget
             (t, leaf)
         }
     };
-    let overlay = multi::wrap(&t, &leaf);
-    if output::of(&t).is_some() {
-        overlay.add_overlay(&plot_button(&t));
-    }
-    let leaf = overlay.upcast::<gtk::Widget>();
+    let leaf = multi::wrap(&t, &leaf).upcast::<gtk::Widget>();
     leaf.add_css_class(LEAF_CLASS);
     leaf.set_hexpand(true);
     leaf.set_vexpand(true);
@@ -187,8 +183,8 @@ thread_local! {
 const PLOT_SPLIT: &str = "plot-split";
 const PLOT_BUTTON: &str = "plot-button";
 
-/// Bottom right of the pane: shows or hides the plot, highlighted while shown.
-fn plot_button(term: &crate::vt::View) -> gtk::Button {
+/// Bottom right of the terminal: shows or hides the plot, highlighted while shown.
+pub(crate) fn plot_button(term: &crate::vt::View) -> gtk::Button {
     let content = adw::ButtonContent::builder().icon_name("termvisor-plot-symbolic").label("Plot").build();
     let b = gtk::Button::builder().child(&content).tooltip_text("Plot the numbers this pane prints (Ctrl+Shift+G)").build();
     b.add_css_class(PLOT_BUTTON);
@@ -206,14 +202,21 @@ fn plot_button(term: &crate::vt::View) -> gtk::Button {
     b
 }
 
-/// Marks the pane's plot button as on or off.
-fn mark_plot(overlay: &gtk::Overlay, on: bool) {
-    let mut cur = overlay.first_child();
-    while let Some(w) = cur {
-        if w.has_css_class(PLOT_BUTTON) {
-            if on { w.add_css_class("on") } else { w.remove_css_class("on") }
+/// Marks the plot button somewhere inside the pane as on or off.
+fn mark_plot(w: &gtk::Widget, on: bool) {
+    if w.has_css_class(PLOT_BUTTON) {
+        if on {
+            w.add_css_class("on");
+            w.set_visible(true);
+        } else {
+            w.remove_css_class("on");
         }
-        cur = w.next_sibling();
+        return;
+    }
+    let mut cur = w.first_child();
+    while let Some(c) = cur {
+        mark_plot(&c, on);
+        cur = c.next_sibling();
     }
 }
 
@@ -226,7 +229,7 @@ pub fn toggle_plot(term: &crate::vt::View) {
         split.set_end_child(None::<&gtk::Widget>);
         overlay.set_child(content.as_ref());
         PLOTS.with(|v| v.borrow_mut().retain(|(w, _)| w.upgrade().is_some_and(|t| &t != term)));
-        mark_plot(&overlay, false);
+        mark_plot(overlay.upcast_ref(), false);
         term.grab_focus();
         return;
     }
@@ -235,12 +238,14 @@ pub fn toggle_plot(term: &crate::vt::View) {
     let split = gtk::Paned::new(gtk::Orientation::Vertical);
     split.add_css_class(PLOT_SPLIT);
     split.set_wide_handle(true);
+    // The plot never gets less than it needs; the terminal gives way.
+    split.set_shrink_start_child(false);
     overlay.set_child(None::<&gtk::Widget>);
     split.set_start_child(Some(&p.widget));
     split.set_end_child(Some(&child));
     split.set_position((overlay.height() * 45 / 100).max(220));
     overlay.set_child(Some(&split));
-    mark_plot(&overlay, true);
+    mark_plot(overlay.upcast_ref(), true);
     PLOTS.with(|v| {
         let mut v = v.borrow_mut();
         v.retain(|(w, _)| w.upgrade().is_some());

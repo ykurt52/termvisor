@@ -438,6 +438,8 @@ pub fn build(app: &adw::Application, state: &Rc<State>, primary: bool) -> adw::T
         .default_height(760)
         .content(&body)
         .build();
+    #[cfg(windows)]
+    crate::sys::native_move(&header, &win);
 
     let weak = view.downgrade();
     let st = state.clone();
@@ -597,22 +599,37 @@ fn check_update(ui: &Ui) {
         return;
     }
     let u = ui.clone();
-    crate::update::check(move |r| {
-        let install = Install::detect();
-        let can = selfupdate::asset(&install, &r).is_some();
-        let toast = adw::Toast::new(&format!("termvisor {} is available", r.version));
-        toast.set_timeout(0);
-        toast.set_button_label(Some(if can { "Update" } else { "Download" }));
-        let (w, r) = (u.clone(), Rc::new(r));
-        toast.connect_button_clicked(move |_| {
-            if can {
-                confirm_update(&w, r.clone(), install.clone());
-            } else {
-                open_uri(&w.win, &r.url);
-            }
-        });
-        u.toasts.add_toast(toast);
+    crate::update::check(move |r| offer_update(&u, r));
+}
+
+/// Check for Updates from the menu or Preferences: also says when this is
+/// the latest version or the check failed.
+fn check_update_now(ui: &Ui) {
+    let u = ui.clone();
+    crate::update::latest(move |r| match r {
+        Ok(r) if crate::update::is_newer(&r) => offer_update(&u, r),
+        Ok(_) => u.toast(&format!("termvisor {} is up to date", env!("CARGO_PKG_VERSION"))),
+        Err(e) => u.toast(&format!("Update check failed: {e}")),
     });
+}
+
+/// Toast for a newer release: Update where this copy can replace itself,
+/// else Download (release page).
+fn offer_update(ui: &Ui, r: Release) {
+    let install = Install::detect();
+    let can = selfupdate::asset(&install, &r).is_some();
+    let toast = adw::Toast::new(&format!("termvisor {} is available", r.version));
+    toast.set_timeout(0);
+    toast.set_button_label(Some(if can { "Update" } else { "Download" }));
+    let (w, r) = (ui.clone(), Rc::new(r));
+    toast.connect_button_clicked(move |_| {
+        if can {
+            confirm_update(&w, r.clone(), install.clone());
+        } else {
+            open_uri(&w.win, &r.url);
+        }
+    });
+    ui.toasts.add_toast(toast);
 }
 
 fn open_uri(win: &adw::ApplicationWindow, url: &str) {
@@ -762,6 +779,7 @@ fn menu_model(state: &Rc<State>) -> gio::Menu {
     rescue.append(Some("Release All Connections…"), Some("win.release-all"));
     menu.append_section(None, &rescue);
     let about = gio::Menu::new();
+    about.append(Some("Check for Updates"), Some("win.check-updates"));
     about.append(Some("About termvisor"), Some("win.about"));
     menu.append_section(None, &about);
     menu
@@ -884,6 +902,7 @@ fn add_actions(ui: &Ui) {
     ui.win.add_action(&me);
     action(ui, "preferences", None, |u, _| crate::prefs::open(&u.win, &u.state));
     action(ui, "about", None, |u, _| crate::about::open(&u.win));
+    action(ui, "check-updates", None, |u, _| check_update_now(u));
     action(ui, "palette", None, |u, _| command_palette(u));
     action(ui, "edit-theme", None, |u, _| crate::themeedit::open(&u.win, &u.state));
     action(ui, "release-all", None, |u, _| u.release());
@@ -927,8 +946,8 @@ fn add_actions(ui: &Ui) {
     on_term(ui, "copy", |_, t| t.copy_clipboard());
     on_term(ui, "paste", |_, t| t.paste_clipboard());
     on_term(ui, "plot", |_, t| pane::toggle_plot(t));
-    on_term(ui, "zoom-in", |_, t| t.set_font_scale((t.font_scale() * 1.1).min(4.0)));
-    on_term(ui, "zoom-out", |_, t| t.set_font_scale((t.font_scale() / 1.1).max(0.25)));
+    on_term(ui, "zoom-in", |_, t| t.set_font_scale(crate::vt::zoom_step(t.font_scale(), 1)));
+    on_term(ui, "zoom-out", |_, t| t.set_font_scale(crate::vt::zoom_step(t.font_scale(), -1)));
     on_term(ui, "zoom-reset", |_, t| t.set_font_scale(1.0));
 
     let current = ui.state.theme().map(|t| t.name.clone()).unwrap_or_default();
