@@ -1,0 +1,21 @@
+name: Feature request
+description: An idea for termvisor
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The task or problem, in your own words. What gets in your way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: The change you have in mind, if you have one.
+  - type: textarea
+    id: now
+    attributes:
+      label: How you do it now
+      description: Workarounds or other tools you use for it.

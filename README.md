@@ -213,6 +213,12 @@ Stuck port or frozen window: [docs/recovery.md](docs/recovery.md), or run `termv
 | `~/.local/state/termvisor/recent.json`, `tabs.json` | Recent sessions, saved tabs |
 | `~/.config/termvisor/themes/*.json` | User themes, see [docs/themes.md](docs/themes.md) |
 
+## Contributing
+
+Bug reports and ideas are welcome as issues. Pull requests are accepted
+from collaborators only; to become one, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 Copyright (C) 2026 Yunus Kurt
