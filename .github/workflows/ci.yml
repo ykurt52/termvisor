@@ -1,9 +1,8 @@
 name: CI
 
+# By hand only (Actions → CI → Run workflow, or
+# `gh workflow run ci.yml --ref <branch>`), so pushes cost no runner time.
 on:
-  push:
-    branches: [main, "v[0-9]*"]
-  pull_request:
   workflow_dispatch:
 
 env:

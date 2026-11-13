@@ -6,7 +6,7 @@
 | Arch Linux (AUR) | PKGBUILD from the release tarball | `packaging/arch/` |
 | Windows 10/11 x64 | installer (Inno Setup) and portable single exe, both with the GTK runtime, built with MSYS2 | `packaging/windows/` |
 | Desktop menu, software centers | Desktop file, AppStream metainfo, icon | `data/` |
-| Checks | GitHub Actions on every push and PR | `.github/workflows/ci.yml` |
+| Checks | GitHub Actions, started by hand | `.github/workflows/ci.yml` |
 | Releases | GitHub Actions on a `v*` tag | `.github/workflows/release.yml` |
 | APT repository | Signed repo on GitHub Pages, rebuilt on each release | `packaging/apt/`, `.github/workflows/apt.yml` |
 
@@ -198,8 +198,16 @@ test suite.
 
 ## CI
 
-`ci.yml` runs on pushes to `main` and to version branches (`v1.0.1`),
-on pull requests and by hand. It has three jobs:
+`ci.yml` runs only when started by hand, so pushes cost no runner time:
+Actions → CI → Run workflow and pick the branch, or
+
+```bash
+gh workflow run ci.yml --ref v1.0.7
+gh run watch    # follow it
+```
+
+Run it before tagging a release, and when a build for Windows is needed
+to test. It has three jobs:
 
 | Job | Does |
 |---|---|
