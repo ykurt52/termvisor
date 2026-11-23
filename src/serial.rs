@@ -417,8 +417,20 @@ fn write_loop(
                     port.clear_break()
                 })
                 .map_err(|e| e.to_string()),
-            Cmd::Dtr(on) => port.write_data_terminal_ready(on).map_err(|e| e.to_string()),
-            Cmd::Rts(on) => port.write_request_to_send(on).map_err(|e| e.to_string()),
+            // Ports without modem lines (ptys, some adapters) refuse these;
+            // that is no reason to drop the connection.
+            Cmd::Dtr(on) => {
+                if let Err(e) = port.write_data_terminal_ready(on) {
+                    crate::warn(&format!("DTR: {e}"));
+                }
+                Ok(())
+            }
+            Cmd::Rts(on) => {
+                if let Err(e) = port.write_request_to_send(on) {
+                    crate::warn(&format!("RTS: {e}"));
+                }
+                Ok(())
+            }
         };
         if let Err(e) = res {
             let _ = tx.send_blocking(Event::Closed(e));

@@ -37,6 +37,7 @@ Code must not use APIs newer than these.
 | Raw TCP | Built-in | v1 |
 | FTP / FTPS | `suppaftp` | v1 |
 | ADB | System `adb` (optional) | v1 |
+| Modbus RTU / TCP, master and slave | Built-in (`src/modbus.rs`) | v1.0.7 |
 | RDP | FreeRDP | v2 |
 | VNC | gtk-vnc | v2 |
 

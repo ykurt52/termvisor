@@ -50,6 +50,7 @@ impl Status {
                     Kind::Ftp => "kind-net",
                     Kind::Adb | Kind::Logcat => "kind-adb",
                     Kind::Usb | Kind::Tool => "kind-net",
+                    Kind::Modbus => "kind-serial",
                 });
                 self.icon.set_icon_name(Some(l.kind.icon()));
                 self.icon.set_visible(true);

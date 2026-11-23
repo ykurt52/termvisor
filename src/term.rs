@@ -34,6 +34,8 @@ pub enum Kind {
     Usb,
     /// Network tool tab (servers, scanner, ping).
     Tool,
+    /// Modbus master or slave.
+    Modbus,
 }
 
 impl Kind {
@@ -50,6 +52,7 @@ impl Kind {
             Kind::Logcat => "Logcat",
             Kind::Usb => "USB",
             Kind::Tool => "Tool",
+            Kind::Modbus => "Modbus",
         }
     }
 
@@ -66,6 +69,7 @@ impl Kind {
             Kind::Logcat => "view-list-symbolic",
             Kind::Usb => "drive-removable-media-symbolic",
             Kind::Tool => "applications-utilities-symbolic",
+            Kind::Modbus => "network-workgroup-symbolic",
         }
     }
 }
@@ -131,6 +135,8 @@ pub struct Launch {
     pub usb: Option<UsbLaunch>,
     /// Network tool.
     pub tool: Option<Tool>,
+    /// Modbus master or slave.
+    pub modbus: Option<crate::mblink::ModbusCfg>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +192,7 @@ impl Launch {
             adb: None,
             usb: None,
             tool: None,
+            modbus: None,
         }
     }
 
@@ -205,6 +212,7 @@ impl Launch {
             adb: None,
             usb: None,
             tool: None,
+            modbus: None,
         }
     }
 
@@ -221,6 +229,7 @@ impl Launch {
             adb: None,
             usb: None,
             tool: None,
+            modbus: None,
         }
     }
 
@@ -247,6 +256,7 @@ impl Launch {
             adb: Some(AdbLaunch { serial: serial.to_string(), logcat }),
             usb: None,
             tool: None,
+            modbus: None,
         }
     }
 
@@ -268,6 +278,7 @@ impl Launch {
             adb: None,
             usb: Some(u),
             tool: None,
+            modbus: None,
         }
     }
 
@@ -284,6 +295,24 @@ impl Launch {
             adb: None,
             usb: None,
             tool: Some(t),
+            modbus: None,
+        }
+    }
+
+    pub fn modbus(cfg: crate::mblink::ModbusCfg) -> Self {
+        Self {
+            kind: Kind::Modbus,
+            argv: Vec::new(),
+            dir: None,
+            title: cfg.title(),
+            target: cfg.desc(),
+            keyring: false,
+            stream: None,
+            ftp: None,
+            adb: None,
+            usb: None,
+            tool: None,
+            modbus: Some(cfg),
         }
     }
 
@@ -300,6 +329,7 @@ impl Launch {
             adb: None,
             usb: None,
             tool: None,
+            modbus: None,
         }
     }
 }
@@ -408,7 +438,7 @@ pub fn ssh_env(target: &str, keyring: bool) -> Vec<String> {
 /// Starts (or restarts) the child process of `term` on its own pty.
 pub fn run(term: &crate::vt::View, launch: &Launch) {
     // Stream and logcat panes have no child here; they feed the terminal.
-    if launch.stream.is_some() || matches!(launch.kind, Kind::Logcat | Kind::Usb | Kind::Tool) {
+    if launch.stream.is_some() || matches!(launch.kind, Kind::Logcat | Kind::Usb | Kind::Tool | Kind::Modbus) {
         return;
     }
     if launch.kind == Kind::Adb {

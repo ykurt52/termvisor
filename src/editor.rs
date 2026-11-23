@@ -11,11 +11,14 @@ use crate::link::{Eol, StreamOpts, View};
 use crate::net::NetCfg;
 use crate::serial::{self, Flow, Parity, SerialCfg};
 use crate::state::State;
+use crate::mblink::{ModbusCfg, Role, Transport};
 use crate::store::{self, Entry, Folder, Shell, Ssh, SshOpts};
 
 const COLORS: &[&str] = &["Default", "Blue", "Green", "Yellow", "Red", "Magenta", "Cyan"];
 const TRISTATE: &[&str] = &["Inherit", "On", "Off"];
-const KINDS: &[&str] = &["SSH", "Shell", "Serial", "Telnet", "Raw TCP", "Mosh", "FTP"];
+const KINDS: &[&str] = &["SSH", "Shell", "Serial", "Telnet", "Raw TCP", "Mosh", "FTP", "Modbus"];
+const MB_ROLES: &[&str] = &["Master (polls a slave)", "Slave (answers a master)"];
+const MB_LINKS: &[&str] = &["RTU (serial port)", "TCP"];
 const FTP_TLS: &[&str] = &["None (plain FTP)", "Explicit (FTPES, AUTH TLS)"];
 const BAUDS: &[u32] = &[
     1200, 2400, 4800, 9600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600, 1_000_000, 1_500_000,
@@ -43,6 +46,7 @@ enum Kind {
     Tcp,
     Mosh,
     Ftp,
+    Modbus,
     Folder,
 }
 
@@ -455,6 +459,71 @@ impl OptRows {
     }
 }
 
+/// Modbus rows; the port comes from the serial or network rows.
+#[derive(Clone)]
+struct ModbusRows {
+    group: adw::PreferencesGroup,
+    role: adw::ComboRow,
+    link: adw::ComboRow,
+    unit: adw::EntryRow,
+    timeout: adw::EntryRow,
+}
+
+impl ModbusRows {
+    fn new() -> Self {
+        let rows = Self {
+            group: adw::PreferencesGroup::new(),
+            role: combo("Role", MB_ROLES),
+            link: combo("Link", MB_LINKS),
+            unit: entry_row("Unit ID"),
+            timeout: entry_row("Reply Timeout (ms)"),
+        };
+        rows.group.set_title("Modbus");
+        rows.unit.set_input_purpose(gtk::InputPurpose::Digits);
+        rows.timeout.set_input_purpose(gtk::InputPurpose::Digits);
+        for r in [rows.role.upcast_ref::<gtk::Widget>(), rows.link.upcast_ref(), rows.unit.upcast_ref(), rows.timeout.upcast_ref()] {
+            rows.group.add(r);
+        }
+        rows
+    }
+
+    fn slave(&self) -> bool {
+        self.role.selected() == 1
+    }
+
+    fn rtu(&self) -> bool {
+        self.link.selected() == 0
+    }
+
+    fn set(&self, c: &ModbusCfg) {
+        self.role.set_selected(if c.role == Role::Slave { 1 } else { 0 });
+        self.link.set_selected(if c.transport == Transport::Rtu { 0 } else { 1 });
+        self.unit.set_text(&c.unit.to_string());
+        self.timeout.set_text(&c.timeout_ms.to_string());
+    }
+
+    fn get(&self, serial: &SerialRows, net: &NetRows) -> Result<ModbusCfg, String> {
+        let unit = text(&self.unit).and_then(|u| u.parse::<u8>().ok()).ok_or("Unit ID must be 0-247")?;
+        let timeout_ms = text(&self.timeout).and_then(|t| t.parse::<u32>().ok()).filter(|t| *t >= 50).ok_or("Reply timeout must be at least 50 ms")?;
+        let mut c = ModbusCfg {
+            role: if self.slave() { Role::Slave } else { Role::Master },
+            transport: if self.rtu() { Transport::Rtu } else { Transport::Tcp },
+            unit,
+            timeout_ms,
+            ..ModbusCfg::default()
+        };
+        if self.rtu() {
+            c.serial = serial.get(StreamOpts::default())?;
+        } else {
+            let n = net.get(StreamOpts::default())?;
+            c.host = n.host;
+            c.port = n.port;
+        }
+        c.check()?;
+        Ok(c)
+    }
+}
+
 #[derive(Clone)]
 struct Form {
     kind: adw::ComboRow,
@@ -471,6 +540,7 @@ struct Form {
     net: NetRows,
     stream: StreamRows,
     ftp: FtpRows,
+    modbus: ModbusRows,
     folder: bool,
 }
 
@@ -486,6 +556,7 @@ impl Form {
                 4 => Kind::Tcp,
                 5 => Kind::Mosh,
                 6 => Kind::Ftp,
+                7 => Kind::Modbus,
                 _ => Kind::Ssh,
             }
         }
@@ -495,12 +566,19 @@ impl Form {
         let k = self.kind();
         let ssh_like = k == Kind::Ssh || k == Kind::Mosh;
         let net = k == Kind::Telnet || k == Kind::Tcp;
+        let mb = k == Kind::Modbus;
         self.host.set_visible(ssh_like);
         self.conn.set_visible(ssh_like || k == Kind::Folder);
-        self.serial.group.set_visible(k == Kind::Serial);
-        self.net.group.set_visible(net);
+        self.serial.group.set_visible(k == Kind::Serial || mb && self.modbus.rtu());
+        self.net.group.set_visible(net || mb && !self.modbus.rtu());
         self.stream.group.set_visible(net || k == Kind::Serial);
         self.ftp.group.set_visible(k == Kind::Ftp);
+        self.modbus.group.set_visible(mb);
+        if mb && self.net.port.text().is_empty() {
+            self.net.port.set_text("502");
+        }
+        // A slave listens: the host is the address to listen on.
+        self.net.host.set_title(if mb && self.modbus.slave() { "Listen Address (0.0.0.0: all)" } else { "Host" });
         if k == Kind::Telnet && self.net.port.text().is_empty() {
             self.net.port.set_text("23");
         }
@@ -543,6 +621,13 @@ impl Form {
                 self.serial.set(&s.cfg);
                 self.stream.set(&s.cfg.opts);
             }
+            Entry::Modbus(m) => {
+                self.kind.set_selected(7);
+                self.modbus.set(&m.cfg);
+                self.serial.set(&m.cfg.serial);
+                self.net.host.set_text(&m.cfg.host);
+                self.net.port.set_text(&m.cfg.port.to_string());
+            }
             Entry::Folder(f) => self.opts.set(&f.defaults),
         }
     }
@@ -579,6 +664,7 @@ impl Form {
                 favorite,
                 no_store: !self.ftp.remember.is_active(),
             }),
+            Kind::Modbus => Entry::Modbus(store::ModbusEntry { name, cfg: self.modbus.get(&self.serial, &self.net)?, color, favorite }),
             Kind::Shell => Entry::Shell(Shell { name, dir: text(&self.dir), color, favorite }),
             Kind::Serial => Entry::Serial(store::Serial { name, cfg: self.serial.get(self.stream.get())?, color, favorite }),
             Kind::Folder => Entry::Folder(Folder {
@@ -623,6 +709,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
         net: NetRows::new(),
         stream: StreamRows::new(),
         ftp: FtpRows::new(),
+        modbus: ModbusRows::new(),
         folder,
     };
     form.conn.add(&form.host);
@@ -650,14 +737,20 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     page.add(&form.serial.group);
     page.add(&form.net.group);
     page.add(&form.stream.group);
+    page.add(&form.modbus.group);
     page.add(&form.ftp.group);
 
     form.serial.set(&default_serial());
     form.stream.set(&StreamOpts::default());
+    form.modbus.set(&ModbusCfg::default());
     form.load(&init);
     form.sync();
     let f = form.clone();
     form.kind.connect_selected_notify(move |_| f.sync());
+    for row in [&form.modbus.role, &form.modbus.link] {
+        let f = form.clone();
+        row.connect_selected_notify(move |_| f.sync());
+    }
 
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&page));
@@ -711,7 +804,7 @@ pub fn open(parent: &impl IsA<gtk::Widget>, state: &Rc<State>, mode: Mode, init:
     let mut texts = vec![&form.name, &form.host, &form.dir];
     texts.extend(form.opts.texts());
     texts.extend(form.serial.texts());
-    texts.extend([&form.net.host, &form.net.port, &form.ftp.host, &form.ftp.port, &form.ftp.user]);
+    texts.extend([&form.net.host, &form.net.port, &form.ftp.host, &form.ftp.port, &form.ftp.user, &form.modbus.unit, &form.modbus.timeout]);
     for r in texts {
         let s = submit.clone();
         r.connect_entry_activated(move |_| s());

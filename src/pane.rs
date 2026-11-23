@@ -117,6 +117,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget
         #[cfg(target_os = "linux")]
         None if launch.kind == Kind::Usb => crate::usbpane::build(state, launch),
         None if launch.kind == Kind::Tool => toolpane::build(state, launch),
+        None if launch.kind == Kind::Modbus => crate::modbuspane::build(state, launch),
         None => {
             let t = hooked(state, launch);
             let leaf = term::scroll(&t).upcast::<gtk::Widget>();

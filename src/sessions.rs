@@ -92,6 +92,7 @@ fn stored(root: &[Entry], list: &[Entry], prefix: &[usize]) -> Vec<Node> {
                 Entry::Serial(_) => ("media-removable-symbolic", "tint-yellow", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Tcp(_) => ("network-transmit-receive-symbolic", "tint-magenta", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Telnet(_) => ("network-wired-symbolic", "tint-red", NodeKind::Item(store::resolve(root, &path))),
+                Entry::Modbus(_) => ("network-workgroup-symbolic", "tint-cyan", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Mosh(_) => ("network-wireless-symbolic", "tint-cyan", NodeKind::Item(store::resolve(root, &path))),
                 Entry::Ftp(_) => ("folder-remote-symbolic", "tint-blue", NodeKind::Item(store::resolve(root, &path))),
             };
@@ -147,6 +148,7 @@ fn kind_look(k: Kind) -> (&'static str, &'static str) {
         Kind::Logcat => ("view-list-symbolic", "tint-yellow"),
         Kind::Usb => ("drive-removable-media-symbolic", "tint-magenta"),
         Kind::Tool => ("applications-utilities-symbolic", "tint-blue"),
+        Kind::Modbus => ("network-workgroup-symbolic", "tint-cyan"),
     }
 }
 

@@ -37,6 +37,8 @@ pub struct Recent {
     pub usb: Option<UsbLaunch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modbus: Option<crate::mblink::ModbusCfg>,
 }
 
 impl Recent {
@@ -53,6 +55,7 @@ impl Recent {
             adb: l.adb.clone(),
             usb: l.usb.clone(),
             tool: l.tool,
+            modbus: l.modbus.clone(),
         }
     }
 
@@ -68,6 +71,8 @@ impl Recent {
             Launch::ftp(c.clone())
         } else if let Some(t) = self.tool {
             Launch::tool(t)
+        } else if let Some(m) = &self.modbus {
+            Launch::modbus(m.clone())
         } else if let Some(u) = &self.usb {
             Launch::usb(u.clone(), &self.title)
         } else if let Some(a) = &self.adb {
@@ -80,7 +85,7 @@ impl Recent {
     }
 
     fn same(&self, o: &Recent) -> bool {
-        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp && self.adb == o.adb && self.usb == o.usb && self.tool == o.tool
+        self.ssh == o.ssh && self.mosh == o.mosh && self.dir == o.dir && self.title == o.title && self.stream == o.stream && self.ftp == o.ftp && self.adb == o.adb && self.usb == o.usb && self.tool == o.tool && self.modbus == o.modbus
     }
 }
 

@@ -66,6 +66,8 @@ Connections
   `ftp://host`, `adb://serial`); session tree with folders and favorites
 - Serial: locking, read-only mirrors, auto-reconnect on replug, DTR/RTS,
   break; Text, Hex and MAVLink views; ASCII and hex send bar
+- Modbus master and slave over RTU and TCP: poll tables with value
+  formats and writes, or simulate a device ([docs/modbus.md](docs/modbus.md))
 - Release All: frees ports and connections left by a crash
 
 Files

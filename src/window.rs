@@ -852,6 +852,7 @@ fn add_actions(ui: &Ui) {
                 Entry::Telnet(store::Net { name: "Telnet".into(), cfg, ..Default::default() })
             }
             Some("ftp") => Entry::Ftp(store::FtpEntry { name: "FTP".into(), ..Default::default() }),
+            Some("modbus") => Entry::Modbus(store::ModbusEntry { name: "Modbus".into(), ..Default::default() }),
             Some("tcp") => Entry::Tcp(store::Net {
                 name: "TCP".into(),
                 cfg: NetCfg { port: 5760, ..Default::default() },

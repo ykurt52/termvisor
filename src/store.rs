@@ -123,6 +123,20 @@ pub enum Entry {
     /// Same fields as ssh; ssh options apply to mosh's ssh bootstrap.
     Mosh(Ssh),
     Ftp(FtpEntry),
+    Modbus(ModbusEntry),
+}
+
+/// Modbus master or slave.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModbusEntry {
+    pub name: String,
+    #[serde(flatten)]
+    pub cfg: crate::mblink::ModbusCfg,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub favorite: bool,
 }
 
 /// FTP or FTPS server, opened in the Files panel.
@@ -149,6 +163,7 @@ impl Entry {
             Entry::Serial(s) => &s.name,
             Entry::Tcp(n) | Entry::Telnet(n) => &n.name,
             Entry::Ftp(f) => &f.name,
+            Entry::Modbus(m) => &m.name,
         }
     }
 
@@ -160,6 +175,7 @@ impl Entry {
             Entry::Serial(s) => s.color.as_deref(),
             Entry::Tcp(n) | Entry::Telnet(n) => n.color.as_deref(),
             Entry::Ftp(f) => f.color.as_deref(),
+            Entry::Modbus(m) => m.color.as_deref(),
         }
     }
 
@@ -171,6 +187,7 @@ impl Entry {
             Entry::Serial(s) => s.name = name,
             Entry::Tcp(n) | Entry::Telnet(n) => n.name = name,
             Entry::Ftp(f) => f.name = name,
+            Entry::Modbus(m) => m.name = name,
         }
     }
 
@@ -182,6 +199,7 @@ impl Entry {
             Entry::Serial(s) => s.favorite = on,
             Entry::Tcp(n) | Entry::Telnet(n) => n.favorite = on,
             Entry::Ftp(f) => f.favorite = on,
+            Entry::Modbus(m) => m.favorite = on,
         }
     }
 
@@ -201,6 +219,7 @@ impl Entry {
             Entry::Serial(s) => s.favorite,
             Entry::Tcp(n) | Entry::Telnet(n) => n.favorite,
             Entry::Ftp(f) => f.favorite,
+            Entry::Modbus(m) => m.favorite,
         }
     }
 }
@@ -337,6 +356,12 @@ pub fn resolve(root: &[Entry], path: &[usize]) -> Result<Launch, String> {
             s.cfg.check().map_err(|e| format!("'{}': {e}", s.name))?;
             let mut l = Launch::stream(Stream::Serial(s.cfg.clone()));
             l.title = s.name.clone();
+            Ok(l)
+        }
+        Some(Entry::Modbus(m)) => {
+            m.cfg.check().map_err(|e| format!("'{}': {e}", m.name))?;
+            let mut l = Launch::modbus(m.cfg.clone());
+            l.title = m.name.clone();
             Ok(l)
         }
         Some(Entry::Tcp(n)) => net_launch(n, false),
