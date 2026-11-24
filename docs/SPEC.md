@@ -33,7 +33,7 @@ Code must not use APIs newer than these.
 | SSH | OpenSSH + ControlMaster | v1 |
 | Serial | `serialport` | v1 |
 | Telnet | Built-in client | v1 |
-| Mosh | System `mosh` (optional) | v1 |
+| Mosh | System `mosh` (optional); Windows: bundled `mosh-client`, experimental | v1 |
 | Raw TCP | Built-in | v1 |
 | FTP / FTPS | `suppaftp` | v1 |
 | ADB | System `adb` (optional) | v1 |
@@ -269,7 +269,8 @@ Arch containers, release packages on tag.
     on the traffic), device/bus picker, control/bulk/interrupt/iso
     transfers with setup packets, status and timestamps, decoders for
     CDC-ACM/FTDI serial data, HID and mass storage, pcap export.
-    One-time permission setup for /dev/usbmon*. Electrical and bit level
+    One-time permission setup for /dev/usbmon*; on Windows USBPcap
+    (experimental). Electrical and bit level
     events (NAK, CRC, SOF) need a hardware analyzer and are out of scope.
 13. Tools: TFTP, HTTP server, scanner, ping, WOL.
 14. Theme editor, settings UI, keybindings.

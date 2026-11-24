@@ -100,7 +100,7 @@ Built on a GitHub Windows runner with MSYS2 (UCRT64), which has GTK4,
 libadwaita and Rust as packages:
 
 ```bash
-pacman -S zstd mingw-w64-ucrt-x86_64-{gtk4,libadwaita,librsvg,adwaita-icon-theme,pkgconf,rust,binutils}
+pacman -S zstd mosh mingw-w64-ucrt-x86_64-{gtk4,libadwaita,librsvg,adwaita-icon-theme,pkgconf,rust,binutils}
 cargo build --release --locked
 packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
 ```
@@ -113,6 +113,9 @@ packaging/windows/bundle.sh target/release/termvisor.exe dist/termvisor
 | `lib/gdk-pixbuf-2.0/` | image loaders, SVG included, and their DLLs |
 | `share/icons/` | Adwaita and hicolor icon themes |
 | `share/glib-2.0/schemas/` | compiled GSettings schemas |
+| `mosh/usr/bin/` | `mosh-client.exe` and its MSYS runtime DLLs (`msys-2.0.dll`, protobuf, crypto, ncurses), when the `mosh` package is installed |
+| `mosh/usr/share/terminfo/` | xterm terminfo entries for mosh-client |
+| `mosh/LICENSES/` | mosh's license files |
 
 GTK finds `share/` and `lib/` next to the exe. The installer and the
 portable exe both ship this folder.

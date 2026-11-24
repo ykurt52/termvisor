@@ -12,6 +12,20 @@ values with spaces or quotes are refused, because mosh splits that command
 on spaces. Password and passphrase prompts use the same dialogs and keyring
 as SSH; connection sharing is not used.
 
+On Windows (experimental) there is no `mosh` script; termvisor does its
+job (`src/moshboot.rs`):
+
+1. `ssh -n -tt <options> -- host` runs `mosh-server new -c 256 -s -l LANG=C.UTF-8` on the host.
+2. The `MOSH CONNECT <port> <key>` line is read from its output.
+3. The bundled `mosh-client <ip> <port>` (`mosh\usr\bin` next to
+   termvisor.exe, MSYS2 build) runs in the pane with `MOSH_KEY` set.
+
+The address is the host name resolved locally, else the server address
+sshd reports (`SSH_CONNECTION`, for ssh config aliases). ssh messages
+show in the pane. The host needs `mosh-server` and UDP ports 60000-61000
+open, as with mosh anywhere. `TERMVISOR_MOSH=builtin` uses the same path
+on Linux (for testing).
+
 ## Connection sharing
 
 Every SSH tab adds:

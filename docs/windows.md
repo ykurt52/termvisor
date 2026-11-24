@@ -31,9 +31,9 @@ it with Pango and turns keys and mouse into input.
 | Server URLs | all IPv4 addresses | main address and loopback |
 | Child cleanup | `PR_SET_PDEATHSIG` | job object that ends its processes when termvisor exits |
 | Background programs (adb, ssh for tunnels and SFTP, tracert) | plain child | `sys::command` adds `CREATE_NO_WINDOW`, so no console window opens |
-| USB capture | usbmon | not available (page hidden) |
+| USB capture | usbmon | experimental: USBPcap (`src/usbpcap.rs`), one root hub per capture, administrator rights asked by USBPcapCMD each time |
 | Release All | other instances and their ports | locks and sockets only |
-| mosh | yes | no mosh client on Windows |
+| mosh | system `mosh` | experimental: bundled `mosh-client` (MSYS2), mosh-server started through `ssh.exe` by termvisor (`src/moshboot.rs`) |
 
 Platform calls live in `src/sys.rs` (file modes, PATH lookup, parent pid,
 tied children, command line quoting) so the rest of the code stays the

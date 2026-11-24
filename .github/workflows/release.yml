@@ -65,6 +65,7 @@ jobs:
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-rust
+            mosh
 
       - name: Build and bundle
         shell: msys2 {0}

@@ -77,6 +77,27 @@ size asked for on an IN submit), status, meaning.
 Status words: STALL, cancelled, device gone, protocol error, CRC/timeout,
 babble, short packet.
 
+## Windows (experimental)
+
+Windows has no usbmon; termvisor uses
+[USBPcap](https://desowin.org/usbpcap/), the capture driver Wireshark
+uses. Install it (or Wireshark with its USBPcap option) and restart
+Windows. termvisor looks for `USBPcapCMD.exe` in `Program Files\USBPcap`,
+`Program Files\Wireshark\extcap` and on PATH.
+
+- The device list comes from `USBPcapCMD --extcap-config` (names only,
+  no VID:PID until the descriptors pass by).
+- A capture runs `USBPcapCMD -d \\.\USBPcap<hub> -o - --inject-descriptors
+  --devices <address>`. USBPcapCMD asks for administrator rights (UAC)
+  every time; refusing ends the capture with a message.
+- One root hub per capture, so there is no Capture All Buses.
+- Packets (pcap link type 249) are turned into usbmon events; views,
+  decoders and saving (link type 220) are the same as on Linux.
+- Open pcap… reads link type 249 files too, on any system.
+- The USBPcap driver is not maintained actively; it is used as is.
+
+Code: `src/usbpcap.rs`.
+
 ## Limits
 
 usbmon sees what the host controller driver sends and receives. It

@@ -29,6 +29,7 @@ mod logpanel;
 mod mav;
 mod mblink;
 mod modbuspane;
+mod moshboot;
 mod modbus;
 mod modem;
 mod multi;
@@ -59,14 +60,16 @@ mod term;
 mod theme;
 mod themeedit;
 mod transfers;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod usb;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod usbdecode;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod usbpage;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod usbpane;
+#[cfg(any(target_os = "linux", windows))]
+mod usbpcap;
 mod vt;
 mod tftp;
 mod toolpane;

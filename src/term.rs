@@ -462,11 +462,56 @@ pub fn run(term: &crate::vt::View, launch: &Launch) {
         .clone()
         .filter(|d| Path::new(d).is_dir())
         .unwrap_or_else(|| glib::home_dir().to_string_lossy().into_owned());
+    if launch.kind == Kind::Mosh && crate::moshboot::builtin() {
+        mosh_start(t, argv, env, dir, out);
+        return;
+    }
     if let Err(e) = t.start(&argv, &env, &dir, out) {
         let name = argv.first().cloned().unwrap_or_default();
         crate::warn(&format!("spawn {name}: {e}"));
         term.feed(format!("\r\nfailed to start {name}: {e}\r\n").as_bytes());
     }
+}
+
+/// mosh through moshboot: ssh starts mosh-server in a thread, then
+/// mosh-client runs on the pty.
+fn mosh_start(t: &pty::Term, argv: Vec<String>, env: Vec<(String, String)>, dir: String, out: Rc<std::cell::RefCell<output::Out>>) {
+    enum Boot {
+        Note(String),
+        Done(Result<crate::moshboot::Connect, String>),
+    }
+    t.upcast_ref::<crate::vt::View>().feed("\x1b[2mstarting mosh-server\u{2026}\x1b[0m\r\n".as_bytes());
+    let (tx, rx) = async_channel::unbounded();
+    std::thread::spawn(move || {
+        let note = |l: &str| {
+            let _ = tx.send_blocking(Boot::Note(l.to_string()));
+        };
+        let r = crate::moshboot::connect(&argv, &env, note);
+        let _ = tx.send_blocking(Boot::Done(r));
+    });
+    let weak = t.downgrade();
+    glib::spawn_future_local(async move {
+        while let Ok(b) = rx.recv().await {
+            let Some(t) = weak.upgrade() else { return };
+            let v = t.upcast_ref::<crate::vt::View>();
+            match b {
+                Boot::Note(l) => v.feed(format!("{l}\r\n").as_bytes()),
+                Boot::Done(Ok(c)) => {
+                    let (argv, env) = c.command();
+                    if let Err(e) = t.start(&argv, &env, &dir, out) {
+                        v.feed(format!("\r\n\x1b[31mfailed to start {}: {e}\x1b[0m\r\n", argv[0]).as_bytes());
+                        v.emit_by_name::<()>("child-exited", &[&1i32]);
+                    }
+                    return;
+                }
+                Boot::Done(Err(e)) => {
+                    v.feed(format!("\x1b[31mmosh: {e}\x1b[0m\r\n").as_bytes());
+                    v.emit_by_name::<()>("child-exited", &[&1i32]);
+                    return;
+                }
+            }
+        }
+    });
 }
 
 /// Wraps a terminal in a scrolled window.

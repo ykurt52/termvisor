@@ -1,6 +1,7 @@
 // USB capture through the kernel's usbmon binary interface (read only; the
 // traffic is not touched), pcap files in the same format, and device
-// information from sysfs.
+// information from sysfs. On Windows usbpcap.rs captures and lists devices
+// and hands over events in the same form.
 //
 // Layout of an event, from drivers/usb/mon/mon_bin.c (struct mon_bin_hdr,
 // 64 bytes, host byte order), followed by len_cap bytes: iso descriptors
@@ -8,15 +9,28 @@
 // same 64 byte header.
 
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+#[cfg(target_os = "linux")]
+use std::fs;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
+#[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
 use std::sync::Arc;
+#[cfg(target_os = "linux")]
 use std::thread;
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+pub use crate::usbpcap::{blocked, capture, devices, source, Capture};
 
 pub const HDR: usize = 64;
 const ISODESC: usize = 16;
@@ -24,16 +38,34 @@ const ISODESC: usize = 16;
 pub const LINKTYPE_USB_LINUX_MMAPPED: u32 = 220;
 
 /// Kernel ring size we ask for; one transfer is cut at a fifth of it.
-const RING: libc::c_ulong = 16 * 1024 * 1024;
+const RING: u64 = 16 * 1024 * 1024;
 /// Data buffer per event (the kernel caps an event at RING / 5).
-const DATA_MAX: usize = (RING / 5) as usize;
+pub const DATA_MAX: usize = (RING / 5) as usize;
 
+/// Linux errno values, as usbmon reports status (negated) on any system.
+pub const EINPROGRESS: i32 = 115;
+pub const EPIPE: i32 = 32;
+pub const ENOENT: i32 = 2;
+pub const ECONNRESET: i32 = 104;
+pub const ESHUTDOWN: i32 = 108;
+pub const EPROTO: i32 = 71;
+pub const EILSEQ: i32 = 84;
+pub const ETIME: i32 = 62;
+pub const ETIMEDOUT: i32 = 110;
+pub const EOVERFLOW: i32 = 75;
+pub const EREMOTEIO: i32 = 121;
+pub const ENODEV: i32 = 19;
+pub const EXDEV: i32 = 18;
+
+#[cfg(target_os = "linux")]
 const MON_IOC_MAGIC: libc::c_ulong = 0x92;
 
+#[cfg(target_os = "linux")]
 const fn ioc(dir: libc::c_ulong, nr: libc::c_ulong, size: libc::c_ulong) -> libc::c_ulong {
     (dir << 30) | (size << 16) | (MON_IOC_MAGIC << 8) | nr
 }
 
+#[cfg(target_os = "linux")]
 /// struct mon_bin_get { hdr *, data *, size_t alloc }
 #[repr(C)]
 struct MonGet {
@@ -42,6 +74,7 @@ struct MonGet {
     alloc: libc::size_t,
 }
 
+#[cfg(target_os = "linux")]
 /// struct mon_bin_stats { u32 queued; u32 dropped; }
 #[repr(C)]
 #[derive(Default)]
@@ -50,8 +83,11 @@ struct MonStats {
     dropped: u32,
 }
 
+#[cfg(target_os = "linux")]
 const MON_IOCG_STATS: libc::c_ulong = ioc(2, 3, std::mem::size_of::<MonStats>() as libc::c_ulong);
+#[cfg(target_os = "linux")]
 const MON_IOCT_RING_SIZE: libc::c_ulong = ioc(0, 4, 0);
+#[cfg(target_os = "linux")]
 const MON_IOCX_GETX: libc::c_ulong = ioc(1, 10, std::mem::size_of::<MonGet>() as libc::c_ulong);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -161,17 +197,17 @@ impl Event {
     pub fn status_text(&self) -> &'static str {
         match -self.status {
             0 => "",
-            libc::EINPROGRESS => "",
-            libc::EPIPE => "STALL",
-            libc::ENOENT | libc::ECONNRESET => "cancelled",
-            libc::ESHUTDOWN => "device gone",
-            libc::EPROTO => "protocol error",
-            libc::EILSEQ => "CRC/timeout",
-            libc::ETIME | libc::ETIMEDOUT => "timeout",
-            libc::EOVERFLOW => "babble",
-            libc::EREMOTEIO => "short packet",
-            libc::ENODEV => "no device",
-            libc::EXDEV => "partial iso",
+            EINPROGRESS => "",
+            EPIPE => "STALL",
+            ENOENT | ECONNRESET => "cancelled",
+            ESHUTDOWN => "device gone",
+            EPROTO => "protocol error",
+            EILSEQ => "CRC/timeout",
+            ETIME | ETIMEDOUT => "timeout",
+            EOVERFLOW => "babble",
+            EREMOTEIO => "short packet",
+            ENODEV => "no device",
+            EXDEV => "partial iso",
             _ => "error",
         }
     }
@@ -222,7 +258,7 @@ pub fn save_pcap(path: &Path, events: &[Event]) -> io::Result<()> {
 }
 
 /// Reads a pcap file with link type 220 (as written by termvisor,
-/// Wireshark or tcpdump on usbmon).
+/// Wireshark or tcpdump on usbmon) or 249 (USBPcap on Windows).
 pub fn load_pcap(path: &Path) -> Result<Vec<Event>, String> {
     let mut r = BufReader::new(File::open(path).map_err(|e| e.to_string())?);
     let mut g = [0u8; 24];
@@ -242,8 +278,9 @@ pub fn load_pcap(path: &Path) -> Result<Vec<Event>, String> {
     if swap {
         return Err("captured on a big-endian machine; not supported".into());
     }
-    if rd(&g[20..24]) != LINKTYPE_USB_LINUX_MMAPPED {
-        return Err(format!("link type {} is not Linux USB (220)", rd(&g[20..24])));
+    let link = rd(&g[20..24]);
+    if link != LINKTYPE_USB_LINUX_MMAPPED && link != crate::usbpcap::LINKTYPE_USBPCAP {
+        return Err(format!("link type {link} is not Linux USB (220) or USBPcap (249)"));
     }
     let mut out = Vec::new();
     let mut rec = [0u8; 16];
@@ -254,6 +291,12 @@ pub fn load_pcap(path: &Path) -> Result<Vec<Event>, String> {
         }
         let mut buf = vec![0u8; incl];
         r.read_exact(&mut buf).map_err(|_| "truncated pcap file".to_string())?;
+        if link == crate::usbpcap::LINKTYPE_USBPCAP {
+            let frac = rd(&rec[4..8]);
+            let usec = if nanos { (frac / 1000) as i32 } else { frac as i32 };
+            out.extend(crate::usbpcap::event(&buf, i64::from(rd(&rec[0..4])), usec, None));
+            continue;
+        }
         if buf.len() < HDR {
             continue;
         }
@@ -268,9 +311,12 @@ pub fn load_pcap(path: &Path) -> Result<Vec<Event>, String> {
     Ok(out)
 }
 
+#[cfg(target_os = "linux")]
 pub const MODULES_FILE: &str = "/etc/modules-load.d/termvisor-usbmon.conf";
+#[cfg(target_os = "linux")]
 pub const RULES_FILE: &str = "/etc/udev/rules.d/70-termvisor-usbmon.rules";
 
+#[cfg(target_os = "linux")]
 /// One-time system setup, run as root through pkexec: load usbmon at boot
 /// and give the logged-in user (udev "uaccess") read access to its device
 /// files. usbmon shows all USB traffic, keyboards included, so the files
@@ -293,10 +339,18 @@ pub fn setup_system() -> Result<(), String> {
     run("udevadm", &["settle"])
 }
 
+#[cfg(target_os = "linux")]
 pub fn monitor_path(bus: u16) -> PathBuf {
     PathBuf::from(format!("/dev/usbmon{bus}"))
 }
 
+/// What a capture of `bus` reads, for messages.
+#[cfg(target_os = "linux")]
+pub fn source(bus: u16) -> String {
+    monitor_path(bus).display().to_string()
+}
+
+#[cfg(target_os = "linux")]
 /// Why capturing is not possible yet, or None.
 pub fn blocked() -> Option<String> {
     let p = monitor_path(0);
@@ -310,11 +364,13 @@ pub fn blocked() -> Option<String> {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// Live capture; dropping it stops the reader.
 pub struct Capture {
     stop: Arc<AtomicBool>,
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for Capture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
@@ -324,16 +380,19 @@ impl Drop for Capture {
 pub enum Batch {
     Events(Vec<Event>),
     /// Events the kernel dropped because the ring was full (total).
+    #[cfg_attr(windows, allow(dead_code))]
     Dropped(u32),
     Error(String),
 }
 
-/// Starts reading `/dev/usbmon<bus>` (0: all buses).
-pub fn capture(bus: u16, tx: async_channel::Sender<Batch>) -> io::Result<Capture> {
+#[cfg(target_os = "linux")]
+/// Starts reading `/dev/usbmon<bus>` (0: all buses). The pane filters by
+/// device; usbmon has no device filter.
+pub fn capture(bus: u16, _dev: Option<u8>, tx: async_channel::Sender<Batch>) -> io::Result<Capture> {
     let f = OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(monitor_path(bus))?;
     let fd = f.as_raw_fd();
     // SAFETY: plain ioctl on our fd; a failure keeps the default ring.
-    unsafe { libc::ioctl(fd, MON_IOCT_RING_SIZE, RING) };
+    unsafe { libc::ioctl(fd, MON_IOCT_RING_SIZE, RING as libc::c_ulong) };
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     thread::spawn(move || {
@@ -414,14 +473,17 @@ impl Device {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn read(dir: &Path, name: &str) -> String {
     fs::read_to_string(dir.join(name)).map(|s| s.trim().to_string()).unwrap_or_default()
 }
 
+#[cfg(target_os = "linux")]
 fn hex(s: &str) -> u32 {
     u32::from_str_radix(s.trim(), 16).unwrap_or(0)
 }
 
+#[cfg(target_os = "linux")]
 /// USB devices under `root` (normally /sys/bus/usb/devices).
 pub fn devices_in(root: &Path) -> Vec<Device> {
     let Ok(dir) = fs::read_dir(root) else { return Vec::new() };
@@ -493,6 +555,7 @@ pub fn devices_in(root: &Path) -> Vec<Device> {
     out
 }
 
+#[cfg(target_os = "linux")]
 pub fn devices() -> Vec<Device> {
     devices_in(Path::new("/sys/bus/usb/devices"))
 }
@@ -529,6 +592,7 @@ pub mod tests {
         Event::parse(&h, data).expect("event")
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn ioctl_numbers() {
         // Values a C program gets from the _IO* macros on 64 bit Linux.
@@ -540,13 +604,13 @@ pub mod tests {
     #[test]
     fn parse_events() {
         let setup = [0x80, 6, 0, 1, 0, 0, 18, 0];
-        let e = event(b'S', 2, 0x80, 6, Some(setup), -libc::EINPROGRESS, &[]);
+        let e = event(b'S', 2, 0x80, 6, Some(setup), -EINPROGRESS, &[]);
         assert_eq!((e.kind, e.xfer, e.dev, e.bus, e.setup), (b'S', Xfer::Control, 6, 3, Some(setup)));
         assert!(e.is_in());
         assert_eq!(e.status_text(), "");
         let e = event(b'C', 3, 0x82, 6, None, 0, b"hello\r\n");
         assert_eq!((e.xfer, e.ep_num(), e.data.as_slice()), (Xfer::Bulk, 2, &b"hello\r\n"[..]));
-        let e = event(b'C', 1, 0x81, 6, None, -libc::EPIPE, &[]);
+        let e = event(b'C', 1, 0x81, 6, None, -EPIPE, &[]);
         assert_eq!(e.status_text(), "STALL");
         // Filler records are skipped.
         let mut h = header(b'S', 3, 1, 6, 3, None, 0, 0, 0);
@@ -563,7 +627,7 @@ pub mod tests {
     #[test]
     fn pcap_roundtrip() {
         let evs = vec![
-            event(b'S', 3, 0x02, 6, None, -libc::EINPROGRESS, b"AT\r"),
+            event(b'S', 3, 0x02, 6, None, -EINPROGRESS, b"AT\r"),
             event(b'C', 3, 0x82, 6, None, 0, b"OK\r\n"),
         ];
         let p = std::env::temp_dir().join(format!("tv-usb-{}.pcap", std::process::id()));
@@ -573,10 +637,11 @@ pub mod tests {
         assert_eq!(back[1].data, b"OK\r\n");
         assert_eq!((back[0].sec, back[0].usec), (1_700_000_000, 123_456));
         assert_eq!(back[0].raw, evs[0].raw);
-        let _ = fs::remove_file(&p);
+        let _ = std::fs::remove_file(&p);
         assert!(load_pcap(Path::new("/nonexistent")).is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn sysfs_devices() {
         let root = std::env::temp_dir().join(format!("tv-sysfs-{}", std::process::id()));

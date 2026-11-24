@@ -114,7 +114,7 @@ pub fn open(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widget
     let (t, leaf) = match &launch.stream {
         Some(s) => streampane::build(state, launch, s.clone()),
         None if launch.kind == Kind::Logcat => logcat::build(state, launch),
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         None if launch.kind == Kind::Usb => crate::usbpane::build(state, launch),
         None if launch.kind == Kind::Tool => toolpane::build(state, launch),
         None if launch.kind == Kind::Modbus => crate::modbuspane::build(state, launch),

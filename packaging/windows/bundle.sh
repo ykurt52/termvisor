@@ -36,6 +36,22 @@ done
 cp "$prefix/share/glib-2.0/schemas/gschemas.compiled" "$out/share/glib-2.0/schemas/"
 cp -r "$prefix/share/icons/Adwaita" "$prefix/share/icons/hicolor" "$out/share/icons/"
 
+# mosh-client with its MSYS runtime and terminfo, in mosh/usr/ so the
+# runtime finds share/terminfo. termvisor runs mosh-server through ssh itself.
+if [ -x /usr/bin/mosh-client.exe ]; then
+  m="$out/mosh/usr"
+  mkdir -p "$m/bin" "$m/share/terminfo"
+  cp /usr/bin/mosh-client.exe "$m/bin/"
+  ldd /usr/bin/mosh-client.exe | awk 'index($3, "/usr/bin/") == 1 { print $3 }' | while read -r dll; do
+    cp "$dll" "$m/bin/"
+  done
+  (cd /usr/share/terminfo && find . -name 'xterm*' -type f | while read -r f; do
+    mkdir -p "$m/share/terminfo/$(dirname "$f")" && cp "$f" "$m/share/terminfo/$f"
+  done)
+  cp -r /usr/share/licenses/mosh "$out/mosh/LICENSES" 2>/dev/null || true
+  echo "mosh-client: $(ls "$m/bin" | tr '\n' ' ')"
+fi
+
 cp LICENSE "$out/LICENSE.txt"
 cp README.md "$out/README.md"
 echo "bundle in $out: $(find "$out" -maxdepth 1 -name '*.dll' | wc -l) DLLs, $(du -sh "$out" | cut -f1)"

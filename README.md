@@ -31,7 +31,7 @@ per-channel show/hide, hover readout, pause and CSV export.
 ![Live plot of four channels from an ADC board above its serial output](docs/images/plot.png)
 
 **USB capture.** Listens to USB traffic without touching it (kernel
-usbmon) and decodes it: descriptors, CDC line coding (`115200 8N1`), the
+usbmon; USBPcap on Windows, experimental) and decodes it: descriptors, CDC line coding (`115200 8N1`), the
 data of USB serial adapters as text, HID keys, mass storage commands,
 stalls. A serial view shows a USB UART conversation as plain text; pcap
 files open in Wireshark.
@@ -113,7 +113,8 @@ Specification and milestones: [docs/SPEC.md](docs/SPEC.md).
 - Windows 10/11 (x64), from the releases page: run
   `termvisor-windows-x64_v*_setup.exe` to install, or
   `termvisor-windows-x64_v*_portable.exe` to run without installing.
-  USB capture and mosh are Linux only.
+  USB capture (needs USBPcap) and mosh (needs `mosh-server` on the host)
+  are experimental on Windows.
 
 Packaging details: [docs/packaging.md](docs/packaging.md).
 

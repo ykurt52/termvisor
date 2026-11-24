@@ -188,6 +188,8 @@ pub fn build(state: &Rc<State>, launch: &Launch) -> (crate::vt::View, gtk::Widge
     let split = gtk::Paned::new(gtk::Orientation::Vertical);
     split.set_wide_handle(true);
     split.set_shrink_start_child(false);
+    // Extra height (window grows, bottom panel hides) goes to the log.
+    split.set_resize_start_child(false);
     split.set_start_child(Some(&top));
     split.set_end_child(Some(&term::scroll(&t)));
     split.set_position(420);

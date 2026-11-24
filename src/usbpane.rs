@@ -255,17 +255,22 @@ fn start(p: &Rc<Pane>) {
     }
     if let Some(why) = usb::blocked() {
         p.set_state("○ not enabled", "tint-red");
-        p.note("33", &format!("{why} Open the USB page in the side panel and press \"Enable USB Capture…\" once."));
+        let how = if cfg!(windows) {
+            "Install USBPcap (desowin.org/usbpcap) and restart Windows."
+        } else {
+            "Open the USB page in the side panel and press \"Enable USB Capture…\" once."
+        };
+        p.note("33", &format!("{why} {how}"));
         return;
     }
     let (tx, rx) = async_channel::bounded(64);
-    match usb::capture(p.launch.bus, tx) {
+    match usb::capture(p.launch.bus, p.launch.dev, tx) {
         Ok(c) => {
             p.capture.replace(Some(c));
         }
         Err(e) => {
             p.set_state("○ error", "tint-red");
-            p.note("31", &format!("{}: {e}", usb::monitor_path(p.launch.bus).display()));
+            p.note("31", &format!("{}: {e}", usb::source(p.launch.bus)));
             return;
         }
     }

@@ -58,10 +58,10 @@ impl Sidebar {
             let page = match note {
                 None if id == "files" => files.widget.clone().upcast::<gtk::Widget>(),
                 None if id == "android" => devices::page(open.clone()).upcast::<gtk::Widget>(),
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", windows))]
                 None if id == "usb" => crate::usbpage::page(open.clone()).upcast::<gtk::Widget>(),
-                // USB capture needs usbmon.
-                #[cfg(not(target_os = "linux"))]
+                // USB capture needs usbmon or USBPcap.
+                #[cfg(not(any(target_os = "linux", windows)))]
                 None if id == "usb" => continue,
                 None if id == "tools" => toolspage::page(open.clone()).upcast::<gtk::Widget>(),
                 None if id == "macros" => macros.widget.clone().upcast::<gtk::Widget>(),

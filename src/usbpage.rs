@@ -1,5 +1,5 @@
-// USB page of the side panel: devices from sysfs, capture buttons, pcap
-// files, and the one-time setup that allows capturing.
+// USB page of the side panel: devices (sysfs, or USBPcap on Windows),
+// capture buttons, pcap files, and the one-time setup that allows capturing.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -23,7 +23,8 @@ fn row(d: &Device, open: &OpenFn) -> adw::ActionRow {
     let r = adw::ActionRow::new();
     let title = if d.name.is_empty() { format!("{:04x}:{:04x}", d.vid, d.pid) } else { d.name.clone() };
     r.set_title(&glib::markup_escape_text(&title));
-    let mut note = format!("{:04x}:{:04x} · bus {} dev {}", d.vid, d.pid, d.bus, d.dev);
+    // USBPcap gives no ids, only names.
+    let mut note = if d.vid == 0 && d.pid == 0 { format!("bus {} dev {}", d.bus, d.dev) } else { format!("{:04x}:{:04x} · bus {} dev {}", d.vid, d.pid, d.bus, d.dev) };
     if !d.speed.is_empty() {
         note.push_str(&format!(" · {} Mb/s", d.speed));
     }
@@ -46,28 +47,36 @@ fn row(d: &Device, open: &OpenFn) -> adw::ActionRow {
 pub fn page(open: OpenFn) -> gtk::Box {
     let all = gtk::Button::with_label("Capture All Buses");
     all.set_tooltip_text(Some("Every USB device on every bus"));
+    // USBPcap reads one root hub per capture.
+    all.set_visible(!cfg!(windows));
     let file = gtk::Button::with_label("Open pcap…");
-    file.set_tooltip_text(Some("View a saved capture (Linux USB pcap, link type 220)"));
+    file.set_tooltip_text(Some("View a saved capture (pcap, link type 220 Linux USB or 249 USBPcap)"));
     let head = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     head.append(&all);
     head.append(&file);
 
     let setup = adw::PreferencesGroup::new();
-    setup.set_title("USB capture is not enabled");
+    setup.set_title(if cfg!(windows) { "USB capture needs USBPcap" } else { "USB capture is not enabled" });
     let why = gtk::Label::new(None);
     why.set_wrap(true);
     why.set_xalign(0.0);
-    let info = gtk::Label::new(Some(&format!(
+    #[cfg(target_os = "linux")]
+    let text = format!(
         "One time, as administrator: loads usbmon at boot ({}) and lets the logged-in user read /dev/usbmon* ({}). \
          Capturing only reads a copy of the traffic. To undo, delete both files.",
         usb::MODULES_FILE,
         usb::RULES_FILE
-    )));
+    );
+    #[cfg(windows)]
+    let text = "Experimental on Windows. Install the USBPcap driver and restart Windows. \
+                Every capture asks for administrator rights (USBPcap reads the traffic through its own driver)."
+        .to_string();
+    let info = gtk::Label::new(Some(&text));
     info.add_css_class("dim-label");
     info.add_css_class("caption");
     info.set_wrap(true);
     info.set_xalign(0.0);
-    let enable = gtk::Button::with_label("Enable USB Capture…");
+    let enable = gtk::Button::with_label(if cfg!(windows) { "Get USBPcap…" } else { "Enable USB Capture…" });
     enable.add_css_class("suggested-action");
     enable.set_halign(gtk::Align::Start);
     let setup_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -102,8 +111,9 @@ pub fn page(open: OpenFn) -> gtk::Box {
             let blocked = usb::blocked();
             setup.set_visible(blocked.is_some());
             why.set_text(blocked.as_deref().unwrap_or(""));
-            // Root hubs (device 1) carry no traffic of their own.
-            let devs: Vec<Device> = usb::devices().into_iter().filter(|d| d.dev > 1).collect();
+            // Root hubs (device 1 on Linux) carry no traffic of their own.
+            let first = if cfg!(windows) { 1 } else { 2 };
+            let devs: Vec<Device> = usb::devices().into_iter().filter(|d| d.dev >= first).collect();
             let key: Vec<(u16, u8, String)> = devs.iter().map(|d| (d.bus, d.dev, d.name.clone())).collect();
             if *shown.borrow() == key {
                 return;
@@ -145,6 +155,12 @@ pub fn page(open: OpenFn) -> gtk::Box {
         });
     });
     let (wy, f) = (why.downgrade(), fill.clone());
+    #[cfg(windows)]
+    enable.connect_clicked(move |b| {
+        let _ = (&wy, &f);
+        gtk::UriLauncher::new("https://desowin.org/usbpcap/").launch(b.root().and_downcast::<gtk::Window>().as_ref(), None::<&gio::Cancellable>, |_| {});
+    });
+    #[cfg(target_os = "linux")]
     enable.connect_clicked(move |b| {
         let Ok(exe) = std::env::current_exe() else { return };
         b.set_sensitive(false);

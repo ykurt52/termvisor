@@ -415,21 +415,21 @@ mod tests {
     fn control_requests() {
         let mut dec = Decoder::default();
         let get = [0x80, 6, 0, 1, 0, 0, 18, 0];
-        let s = event(b'S', 2, 0x80, 6, Some(get), -libc::EINPROGRESS, &[]);
+        let s = event(b'S', 2, 0x80, 6, Some(get), -crate::usb::EINPROGRESS, &[]);
         assert_eq!(dec.describe(&s, None), "GET_DESCRIPTOR DEVICE len 18");
         let desc = [18, 1, 0x00, 0x02, 0x02, 0, 0, 64, 0x86, 0x1a, 0xd2, 0x55, 0, 1, 1, 2, 3, 1];
         let c = event(b'C', 2, 0x80, 6, None, 0, &desc);
         assert_eq!(dec.describe(&c, None), "DEVICE USB 2.0 class 2 (CDC control) 1a86:55d2 max packet 64 configs 1");
 
         let str_get = [0x80, 6, 2, 3, 0x09, 0x04, 255, 0];
-        let s = event(b'S', 2, 0x80, 6, Some(str_get), -libc::EINPROGRESS, &[]);
+        let s = event(b'S', 2, 0x80, 6, Some(str_get), -crate::usb::EINPROGRESS, &[]);
         dec.describe(&s, None);
         let c = event(b'C', 2, 0x80, 6, None, 0, &[8, 3, b'U', 0, b'S', 0, b'B', 0]);
         assert_eq!(dec.describe(&c, None), "STRING \"USB\"");
 
         let acm = serial_dev(0x1a86, 0x0a);
         let lc = [0x21, 0x20, 0, 0, 0, 0, 7, 0];
-        let s = event(b'S', 2, 0x00, 6, Some(lc), -libc::EINPROGRESS, &[0x00, 0xc2, 0x01, 0x00, 0, 0, 8]);
+        let s = event(b'S', 2, 0x00, 6, Some(lc), -crate::usb::EINPROGRESS, &[0x00, 0xc2, 0x01, 0x00, 0, 0, 8]);
         assert_eq!(dec.describe(&s, Some(&acm)), "CDC SET_LINE_CODING 115200 8N1");
         let cls = [0x21, 0x22, 3, 0, 0, 0, 0, 0];
         assert_eq!(setup_text(&cls, Some(&acm), &[]), "CDC SET_CONTROL_LINE_STATE DTR on RTS on");
@@ -475,7 +475,7 @@ mod tests {
         cbw.extend_from_slice(&7u32.to_le_bytes());
         cbw.extend_from_slice(&4096u32.to_le_bytes());
         cbw.extend_from_slice(&[0x80, 0, 10, 0x28, 0, 0, 0, 0, 0x10, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0]);
-        let e = event(b'S', 3, 0x02, 7, None, -libc::EINPROGRESS, &cbw);
+        let e = event(b'S', 3, 0x02, 7, None, -crate::usb::EINPROGRESS, &cbw);
         assert_eq!(dec.describe(&e, None), "CBW tag 7 LUN 0 READ(10) lba 16 blocks 8 (4096 bytes in)");
         let mut csw = b"USBS".to_vec();
         csw.extend_from_slice(&7u32.to_le_bytes());
