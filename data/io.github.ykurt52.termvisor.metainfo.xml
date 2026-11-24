@@ -72,6 +72,11 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.8" date="2026-11-24">
+      <description>
+        <p>Experimental on Windows: mosh sessions with a bundled mosh-client, and USB capture through USBPcap. USBPcap capture files (link type 249) open on every system. The Modbus log takes the extra height when the window grows.</p>
+      </description>
+    </release>
     <release version="1.0.7" date="2026-11-23">
       <description>
         <p>Modbus master and slave over RTU and TCP: polls with scan rate and value formats, writing coils and registers, a simulated slave with editable tables, frames in hex in the terminal. Serial ports without modem lines no longer drop the link when DTR or RTS is set.</p>
