@@ -769,7 +769,8 @@ impl Plot {
             let _ = cr.stroke();
             cr.set_dash(&[], 0.0);
             cr.move_to(left + pw - 70.0, yy - 4.0);
-            let _ = cr.show_text(&format!("≥ {}", short(th)));
+            // ASCII: the toy text API has no font fallback (Noto Sans has no ≥).
+            let _ = cr.show_text(&format!(">= {}", short(th)));
         }
         cr.set_line_width(1.4);
         for &ch in &mine {
